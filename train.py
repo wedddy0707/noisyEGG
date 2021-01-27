@@ -152,8 +152,9 @@ def suffix_test(game, n_features, device):
 
     with torch.no_grad():
         inputs = torch.eye(n_features).to(device)
-        messages, cancellation, _, _ = game.sender(inputs)
-        lengths = find_lengths(cancellation)
+        seq, _, _ = game.sender(inputs)
+        messages, stop_seq = seq
+        lengths = find_lengths(stop_seq)
 
         for i, m, ln in zip(inputs, messages, lengths):
             i_symbol = i.argmax().item()
@@ -177,8 +178,9 @@ def dump(game, n_features, device):
     train_state = game.training  # persist so we restore it back
     game.eval()
 
-    messages, cancellation, _, _ = game.sender(inputs)
-    lengths = find_lengths(cancellation)
+    seq, _, _ = game.sender(inputs)
+    messages, stop_seq = seq
+    lengths = find_lengths(stop_seq)
     outputs, _, _ = game.receiver(messages, None, lengths)
 
     game.train(mode=train_state)

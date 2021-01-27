@@ -85,8 +85,10 @@ class RnnSenderReinforce(nn.Module):
 
         symb_seq = []
         stop_seq = []
-        logits = []
-        entropy = []
+        symb_logits = []
+        stop_logits = []
+        symb_entropy = []
+        stop_entropy = []
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
@@ -104,38 +106,35 @@ class RnnSenderReinforce(nn.Module):
                 prev_hidden[i] = h_t
                 input = h_t
 
-            symb_logits = F.log_softmax(self.output_symbol(h_t), dim=1)
-            stop_probs = F.sigmoid(
+            symb_probs = F.softmax(self.output_symbol(h_t), dim=1)
+            stop_probs = torch.sigmoid(
                 torch.squeeze(self.whether_to_stop(h_t), 1)
             )
-            symb_distr = Categorical(logits=symb_logits)
+            symb_distr = Categorical(probs=symb_probs)
             stop_distr = Bernoulli(probs=stop_probs)
-            # entropy.append(symb_distr.entropy() + 0.1 * stop_distr.entropy())
-            entropy.append(symb_distr.entropy())
-
-            if self.training:
-                symb = symb_distr.sample()
-                stop = stop_distr.sample()
-            else:
-                symb = symb_logits.argmax(dim=1)
-                stop = (stop_distr.probs > 0.5).float()
-                print(f'symbs {symb}')
-                print(f'probs {stop_distr.probs}')
-            logits.append(
-                symb_distr.log_prob(symb) +
-                stop_distr.log_prob(stop)
-            )
-
-            input = self.embedding(symb)
+            symb = symb_distr.sample() if self.training else symb_probs.argmax(dim=1)
+            stop = stop_distr.sample() if self.training else (stop_probs > 0.5).float()
+            symb_logits.append(symb_distr.log_prob(symb))
+            stop_logits.append(stop_distr.log_prob(stop))
+            symb_entropy.append(symb_distr.entropy())
+            stop_entropy.append(stop_distr.entropy())
             symb_seq.append(symb)
             stop_seq.append(stop)
 
+            input = self.embedding(symb)
+
         symb_seq = torch.stack(symb_seq).permute(1, 0)
         stop_seq = torch.stack(stop_seq).permute(1, 0).long()
-        logits = torch.stack(logits).permute(1, 0)
-        entropy = torch.stack(entropy).permute(1, 0)
+        symb_logits = torch.stack(symb_logits).permute(1, 0)
+        stop_logits = torch.stack(stop_logits).permute(1, 0)
+        symb_entropy = torch.stack(symb_entropy).permute(1, 0)
+        stop_entropy = torch.stack(stop_entropy).permute(1, 0)
 
-        return symb_seq, stop_seq, logits, entropy
+        sequence = (symb_seq, stop_seq)
+        logits = (symb_logits, stop_logits)
+        entropy = (symb_entropy, stop_entropy)
+
+        return sequence, logits, entropy
 
 
 class RnnReceiverDeterministic(nn.Module):
@@ -191,97 +190,100 @@ class SenderReceiverRnnReinforce(nn.Module):
         self.sender_entropy_common_ratio = sender_entropy_common_ratio
         self.receiver_entropy_coeff = receiver_entropy_coeff
         self.loss = loss
-        self.length_cost = length_cost
-        self.machineguntalk_cost = machineguntalk_cost
+        self.len_cost = length_cost
+        self.mgt_cost = machineguntalk_cost
 
         self.channel = channel
 
         self.baselines = defaultdict(baseline_type)
 
     def forward(self, sender_input, labels, receiver_input=None):
-        message, cancellation, log_prob_s, entropy_s = self.sender(
-            sender_input)
+        ######################################
+        # Forward Propagation through Sender #
+        ######################################
+        seq_s, logprob_s, entropy_s = self.sender(sender_input)
+        symb_seq_s, stop_seq_s = seq_s
+        symb_logprob_s, stop_logprob_s = logprob_s
+        symb_entropy_s, stop_entropy_s = entropy_s
 
+        #######################################
+        # Forward Propagation through Channel #
+        #######################################
         if self.training:
-            message = self.channel(message)
+            symb_seq_s = self.channel(symb_seq_s)
 
-        message_lengths = find_lengths(cancellation)
-        receiver_output, log_prob_r, entropy_r = self.receiver(
-            message, receiver_input, message_lengths)
+        #########################################
+        # Check lengths of sequences (messages) #
+        #########################################
+        lengths = find_lengths(stop_seq_s)
+        max_len = symb_seq_s.size(1)
 
-        loss, rest = self.loss(
-            sender_input, message, receiver_input, receiver_output, labels)
+        ########################################
+        # Forward Propagation through Receiver #
+        ########################################
+        receiver_output, logprob_r, entropy_r = self.receiver(
+            symb_seq_s,
+            receiver_input,
+            lengths)
 
-        # the entropy of the outputs of S before and including the eos symbol -
-        # as we don't care about what's after
+        ############################################
+        # Calculation of Effective logprob/entropy #
+        ############################################
         effective_entropy_s = torch.zeros_like(entropy_r)
+        effective_logprob_s = torch.zeros_like(logprob_r)
+        denom = torch.zeros_like(lengths).float()
+        ratio = 1.0
+        for i in range(symb_seq_s.size(1)):
+            not_stopped = (i < lengths).float()
+            effective_entropy_s += symb_entropy_s[:, i] * not_stopped * ratio
+            effective_entropy_s += stop_entropy_s[:, i] * not_stopped * ratio
+            effective_logprob_s += symb_logprob_s[:, i] * not_stopped
+            effective_logprob_s += stop_logprob_s[:, i] * not_stopped
+            denom += ratio * not_stopped
+            ratio *= self.sender_entropy_common_ratio
+        effective_entropy_s = effective_entropy_s / denom
 
-        # the log prob of the choices made by S before and including the eos symbol - again, we don't
-        # care about the rest
-        effective_log_prob_s = torch.zeros_like(log_prob_r)
-
-        # decayed_ratio:
-        #   the ratio of sender entropy's weight at each time step
-        # decayed_denom:
-        #   the denominator for the weighted mean of sender entropy
-        decayed_ratio = 1.0
-        decayed_denom = torch.zeros_like(message_lengths).float()
-        for i in range(message.size(1)):
-            not_eosed = (i < message_lengths).float()
-            effective_entropy_s += entropy_s[:, i] * decayed_ratio * not_eosed
-            effective_log_prob_s += log_prob_s[:, i] * not_eosed
-            decayed_denom += decayed_ratio * not_eosed
-            # update decayed_ratio geometrically
-            decayed_ratio = decayed_ratio * self.sender_entropy_common_ratio
-        effective_entropy_s = effective_entropy_s / decayed_denom
-
-        weighted_entropy = effective_entropy_s.mean() * self.sender_entropy_coeff + \
+        logprob = effective_logprob_s + logprob_r
+        entropy = (
+            effective_entropy_s.mean() * self.sender_entropy_coeff +
             entropy_r.mean() * self.receiver_entropy_coeff
+        )
 
-        log_prob = effective_log_prob_s + log_prob_r
+        #######################
+        # Calculation of Loss #
+        #######################
+        loss, rest = self.loss(
+            sender_input, symb_seq_s, receiver_input, receiver_output, labels)
+        # Auxiliary losses
+        len_loss = self.len_cost * lengths.float()
+        mgt_loss = self.mgt_cost * (lengths == max_len).float()
 
-        length_loss = message_lengths.float() * self.length_cost
-
-        policy_length_loss = (
-            (length_loss -
-             self.baselines['length'].predict(length_loss)) *
-            effective_log_prob_s).mean()
-        policy_loss = (
-            (loss.detach() -
-             self.baselines['loss'].predict(
-                loss.detach())) *
-            log_prob).mean()
-
-        # my new loss
-        machineguntalk_loss = (
-            (message_lengths == message.size(1)).float() *
-            self.machineguntalk_cost)
-        policy_machineguntalk_loss = (
-            (machineguntalk_loss -
-             self.baselines['machineguntalk'].predict(machineguntalk_loss)) *
-            effective_log_prob_s).mean()
+        policy_loss = loss.detach() - \
+            self.baselines['loss'].predict(loss.detach())
+        policy_loss = (policy_loss * logprob).mean()
+        policy_len_loss = len_loss - self.baselines['len'].predict(len_loss)
+        policy_len_loss = (policy_len_loss * effective_logprob_s).mean()
+        policy_mgt_loss = mgt_loss - self.baselines['mgt'].predict(mgt_loss)
+        policy_mgt_loss = (policy_mgt_loss * effective_logprob_s).mean()
 
         optimized_loss = (
-            policy_machineguntalk_loss +
-            policy_length_loss +
+            loss.mean() +
+            policy_mgt_loss +
+            policy_len_loss +
             policy_loss -
-            weighted_entropy
+            entropy
         )
-        # if the receiver is deterministic/differentiable, we apply the actual
-        # loss
-        optimized_loss += loss.mean()
 
         if self.training:
             self.baselines['loss'].update(loss)
-            self.baselines['length'].update(length_loss)
-            self.baselines['machineguntalk'].update(machineguntalk_loss)
+            self.baselines['len'].update(len_loss)
+            self.baselines['mgt'].update(mgt_loss)
 
         for k, v in rest.items():
             rest[k] = v.mean().item() if hasattr(v, 'mean') else v
         rest['loss'] = optimized_loss.detach().item()
-        rest['sender_entropy'] = entropy_s.mean().item()
-        rest['receiver_entropy'] = entropy_r.mean().item()
+        rest['sender_entropy'] = symb_entropy_s.mean().item()
         rest['original_loss'] = loss.mean().item()
-        rest['mean_length'] = message_lengths.float().mean().item()
+        rest['mean_length'] = lengths.float().mean().item()
 
         return optimized_loss, rest
