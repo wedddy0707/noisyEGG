@@ -8,7 +8,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from egg.core.util import find_lengths
+from util import find_lengths
 
 
 class NoisyCell(nn.Module):

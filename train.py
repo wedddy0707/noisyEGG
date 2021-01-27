@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in
 # https://github.com/facebookresearch/EGG/blob/master/LICENSE
 
+import json
 import argparse
 import numpy as np
 import torch.utils.data
@@ -11,12 +12,13 @@ import egg.core as core
 from egg.core import EarlyStopperAccuracy
 from egg.zoo.channel.features import OneHotLoader, UniformLoader
 from egg.zoo.channel.archs import Sender, Receiver
-from egg.zoo.channel.train import loss, dump
+from egg.zoo.channel.train import loss
 
 from channel import Channel
 from reinforce_wrappers import RnnSenderReinforce
 from reinforce_wrappers import RnnReceiverDeterministic
 from reinforce_wrappers import SenderReceiverRnnReinforce
+from util import find_lengths
 
 
 def get_params(params):
@@ -144,57 +146,73 @@ def get_params(params):
     return args
 
 
-def suffix_test(game, n_features, device, add_eos=False):
-    '''
-    - add_eos: whether to add eos to each prefix
-    '''
+def suffix_test(game, n_features, device):
     train_state = game.training  # persist so we restore it back
     game.eval()
 
-    prediction_history = []
     with torch.no_grad():
-        input = torch.eye(n_features).to(device)
-        message = game.sender(input)  # Sender
-        message = message[0]
-        max_len = message.size(1)
-        for length in range(max_len):
-            prefix = message[:, 0:length + 1]
-            if add_eos:
-                eos = torch.zeros(prefix.size(0), 1, dtype=int).to(device)
-                prefix = torch.cat((prefix, eos), dim=1)
-            output = game.receiver(prefix)  # Receiver
-            output = output[0]
-            output = output.argmax(dim=1)  # max(dim=1).values
-            prediction_history.append(output)
-        prediction_history = torch.stack(prediction_history).permute(1, 0)
+        inputs = torch.eye(n_features).to(device)
+        messages, cancellation, _, _ = game.sender(inputs)
+        lengths = find_lengths(cancellation)
 
-        for i in range(input.size(0)):
-            input_symbol = input[i].argmax().item()
-            for length in range(max_len):
-                prefix = message[i, 0:length + 1]
-                eosed = (message[i, length] == 0)
-                if add_eos:
-                    eos = torch.zeros(1, dtype=int).to(device)
-                    prefix = torch.cat((prefix, eos), dim=0)
-                prediction = prediction_history[i][length].item()
-                if add_eos:
-                    prefix_type = 'prefix_with_eos'
-                else:
-                    prefix_type = 'prefix_witout_eos'
-                print(
-                    f'input: {input_symbol} -> {prefix_type}: {",".join([str(x.item()) for x in prefix])} -> prediction: {prediction}',
-                    flush=True)
-                if eosed:
-                    break
+        for i, m, ln in zip(inputs, messages, lengths):
+            i_symbol = i.argmax().item()
+            for m_idx in range(ln.item()):
+                p = torch.stack([m[0:m_idx + 1]])
+                o, _, _ = game.receiver(p, None, torch.tensor([m_idx + 1]))
+                o_symbol = o.argmax().item()
+
+                dump_message = (
+                    f'input: {i_symbol} -> '
+                    f'message: {",".join([str(p[0,i].item()) for i in range(m_idx + 1)])} -> '
+                    f'output: {o_symbol}')
+                print(dump_message, flush=True)
+
     game.train(mode=train_state)
+
+
+def dump(game, n_features, device):
+    inputs = torch.eye(n_features).to(device)
+
+    train_state = game.training  # persist so we restore it back
+    game.eval()
+
+    messages, cancellation, _, _ = game.sender(inputs)
+    lengths = find_lengths(cancellation)
+    outputs, _, _ = game.receiver(messages, None, lengths)
+
+    game.train(mode=train_state)
+
+    uniform_acc = 0.
+    powerlaw_acc = 0.
+    powerlaw_probs = 1 / np.arange(1, n_features + 1, dtype=np.float32)
+    powerlaw_probs /= powerlaw_probs.sum()
+
+    for i, m, ln, o in zip(inputs, messages, lengths, outputs):
+        i_symbol = i.argmax()
+        o_symbol = o.argmax()
+
+        is_successful = (i_symbol == o_symbol).float().item()
+        uniform_acc += is_successful
+        powerlaw_acc += powerlaw_probs[i_symbol] * is_successful
+
+        dump_message = (
+            f'input: {i_symbol.item()} -> '
+            f'message: {",".join([str(m[i].item()) for i in range(ln.item())])} -> '
+            f'output: {o_symbol.item()}')
+        print(dump_message, flush=True)
+
+    uniform_acc /= n_features
+
+    print(f'Mean accuracy wrt uniform distribution is {uniform_acc}')
+    print(f'Mean accuracy wrt powerlaw distribution is {powerlaw_acc}')
+    print(json.dumps({'powerlaw': powerlaw_acc, 'unif': uniform_acc}))
 
 
 def main(params):
     opts = get_params(params)
     print(opts, flush=True)
     device = opts.device
-
-    force_eos = opts.force_eos == 1
 
     if opts.probs == 'uniform':
         probs = np.ones(opts.n_features)
@@ -230,7 +248,6 @@ def main(params):
         cell=opts.sender_cell,
         max_len=opts.max_len,
         num_layers=opts.sender_num_layers,
-        force_eos=force_eos,
         noise_loc=opts.sender_noise_loc,
         noise_scale=opts.sender_noise_scale)
 
@@ -321,12 +338,10 @@ def main(params):
 
     trainer.train(n_epochs=opts.n_epochs)
 
-    print('-- suffix test without adding eos --')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=False)
-    print('-- suffix test adding eos --')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=True)
+    print('-- suffix test --')
+    suffix_test(trainer.game, opts.n_features, device)
     print('-- dump --')
-    dump(trainer.game, opts.n_features, device, False)
+    dump(trainer.game, opts.n_features, device)
     core.close()
 
 

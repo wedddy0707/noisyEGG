@@ -7,12 +7,12 @@ from collections import defaultdict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from torch.distributions import Categorical, Bernoulli
 
-from egg.core.util import find_lengths
 from egg.core.baselines import MeanBaseline
 
-from rnn import RnnEncoder
+from rnn import RnnEncoder      # Note that this 'rnn' is not the file in EGG
+from util import find_lengths  # Note that this 'utils' is not the file in EGG
 
 
 class RnnSenderReinforce(nn.Module):
@@ -25,27 +25,20 @@ class RnnSenderReinforce(nn.Module):
             max_len,
             num_layers=1,
             cell='rnn',
-            force_eos=True,
             noise_loc=0.0,
             noise_scale=0.0,
     ):
         super(RnnSenderReinforce, self).__init__()
         self.agent = agent
-
-        self.force_eos = force_eos
-
         self.max_len = max_len
-        if force_eos:
-            assert self.max_len > 1, "Cannot force eos when max_len is below 1"
-            self.max_len -= 1
 
-        self.hidden_to_output = nn.Linear(hidden_size, vocab_size)
+        self.output_symbol = nn.Linear(hidden_size, vocab_size)
+        self.whether_to_stop = nn.Linear(hidden_size, 1)
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.sos_embedding = nn.Parameter(torch.zeros(embed_dim))
         self.embed_dim = embed_dim
         self.vocab_size = vocab_size
         self.num_layers = num_layers
-        self.cells = None
 
         self.noise_loc = noise_loc
         self.noise_scale = noise_scale
@@ -74,6 +67,10 @@ class RnnSenderReinforce(nn.Module):
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
+    def add_noise(self, x):
+        e = torch.randn_like(x).to(x.device)
+        return x + self.noise_loc + e * self.noise_scale
+
     def forward(self, x):
         prev_hidden = [self.agent(x)]
         prev_hidden.extend([torch.zeros_like(prev_hidden[0])
@@ -86,7 +83,8 @@ class RnnSenderReinforce(nn.Module):
 
         input = torch.stack([self.sos_embedding] * x.size(0))
 
-        sequence = []
+        symb_seq = []
+        stop_seq = []
         logits = []
         entropy = []
 
@@ -94,16 +92,9 @@ class RnnSenderReinforce(nn.Module):
             for i, layer in enumerate(self.cells):
                 if self.training:
                     if isinstance(layer, nn.LSTMCell):
-                        e = torch.randn_like(prev_c[i]).to(prev_c[i].device)
-                        prev_c[i] = (
-                            prev_c[i] + self.noise_loc + e * self.noise_scale
-                        )
+                        prev_c[i] = self.add_noise(prev_c[i])
                     else:
-                        e = torch.randn_like(
-                            prev_hidden[i]).to(
-                            prev_hidden[i].device)
-                        prev_hidden[i] = (
-                            prev_hidden[i] + self.noise_loc + e * self.noise_scale)
+                        prev_hidden[i] = self.add_noise(prev_hidden[i])
 
                 if isinstance(layer, nn.LSTMCell):
                     h_t, c_t = layer(input, (prev_hidden[i], prev_c[i]))
@@ -113,31 +104,38 @@ class RnnSenderReinforce(nn.Module):
                 prev_hidden[i] = h_t
                 input = h_t
 
-            step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
-            distr = Categorical(logits=step_logits)
-            entropy.append(distr.entropy())
+            symb_logits = F.log_softmax(self.output_symbol(h_t), dim=1)
+            stop_probs = F.sigmoid(
+                torch.squeeze(self.whether_to_stop(h_t), 1)
+            )
+            symb_distr = Categorical(logits=symb_logits)
+            stop_distr = Bernoulli(probs=stop_probs)
+            # entropy.append(symb_distr.entropy() + 0.1 * stop_distr.entropy())
+            entropy.append(symb_distr.entropy())
 
             if self.training:
-                x = distr.sample()
+                symb = symb_distr.sample()
+                stop = stop_distr.sample()
             else:
-                x = step_logits.argmax(dim=1)
-            logits.append(distr.log_prob(x))
+                symb = symb_logits.argmax(dim=1)
+                stop = (stop_distr.probs > 0.5).float()
+                print(f'symbs {symb}')
+                print(f'probs {stop_distr.probs}')
+            logits.append(
+                symb_distr.log_prob(symb) +
+                stop_distr.log_prob(stop)
+            )
 
-            input = self.embedding(x)
-            sequence.append(x)
+            input = self.embedding(symb)
+            symb_seq.append(symb)
+            stop_seq.append(stop)
 
-        sequence = torch.stack(sequence).permute(1, 0)
+        symb_seq = torch.stack(symb_seq).permute(1, 0)
+        stop_seq = torch.stack(stop_seq).permute(1, 0).long()
         logits = torch.stack(logits).permute(1, 0)
         entropy = torch.stack(entropy).permute(1, 0)
 
-        if self.force_eos:
-            zeros = torch.zeros((sequence.size(0), 1)).to(sequence.device)
-
-            sequence = torch.cat([sequence, zeros.long()], dim=1)
-            logits = torch.cat([logits, zeros], dim=1)
-            entropy = torch.cat([entropy, zeros], dim=1)
-
-        return sequence, logits, entropy
+        return symb_seq, stop_seq, logits, entropy
 
 
 class RnnReceiverDeterministic(nn.Module):
@@ -201,12 +199,13 @@ class SenderReceiverRnnReinforce(nn.Module):
         self.baselines = defaultdict(baseline_type)
 
     def forward(self, sender_input, labels, receiver_input=None):
-        message, log_prob_s, entropy_s = self.sender(sender_input)
+        message, cancellation, log_prob_s, entropy_s = self.sender(
+            sender_input)
 
         if self.training:
             message = self.channel(message)
 
-        message_lengths = find_lengths(message)
+        message_lengths = find_lengths(cancellation)
         receiver_output, log_prob_r, entropy_r = self.receiver(
             message, receiver_input, message_lengths)
 
