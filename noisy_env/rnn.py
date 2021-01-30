@@ -40,49 +40,47 @@ class NoisyCell(nn.Module):
             cell_type[cell](input_size=embed_dim, hidden_size=n_hidden) if i == 0 else
             cell_type[cell](input_size=n_hidden, hidden_size=n_hidden) for i in range(num_layers)])
 
+    def add_noise_to(self, x):
+        if self.training:
+            e = torch.randn_like(x).to(x.device)
+            x = self.noise_loc + e * self.noise_scale
+        return x
+
     def forward(self, input: torch.Tensor, h_0: Optional[torch.Tensor] = None):
         is_packed = isinstance(input, torch.nn.utils.rnn.PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0].item()
-            num_batches = sorted_indices.size(0)
             if h_0 is None:
+                device = input.device
                 prev_h = [
-                    torch.zeros(
-                        num_batches,
-                        self.hidden_size).to(
-                        input.device) for _ in range(
-                        self.num_layers)]
+                    torch.zeros(max_batch_size, self.hidden_size).to(device)
+                    for _ in range(self.num_layers)
+                ]
                 prev_c = [
-                    torch.zeros(
-                        num_batches,
-                        self.hidden_size).to(
-                        input.device) for _ in range(
-                        self.num_layers)]
+                    torch.zeros_like(prev_h[0])
+                    for _ in range(self.num_layers)
+                ]
             else:
                 prev_h, prev_c = h_0 if self.isLSTM else (h_0, None)
 
             input_idx = 0
             for batch_size in batch_sizes.tolist():
                 x = input[input_idx:input_idx + batch_size]
-                for layer_no, layer in enumerate(self.cells):
+                for i, layer in enumerate(self.cells):
                     if self.isLSTM:
                         h, c = layer(
-                            x, (prev_h[layer_no][0:batch_size], prev_c[layer_no][0:batch_size]))
-                        if self.training:
-                            e = torch.randn_like(c).to(c.device)
-                            c = c + self.noise_loc + e * self.noise_scale
-                        prev_c[layer_no] = torch.cat(
-                            (c, prev_c[layer_no][batch_size:max_batch_size]))
+                            x, (prev_h[i][0:batch_size], prev_c[i][0:batch_size]))
+                        c = self.add_noise_to(c)
+                        prev_c[i] = torch.cat(
+                            (c, prev_c[i][batch_size:max_batch_size]))
                     else:
-                        h = layer(x, prev_h[layer_no][0:batch_size])
-                        if self.training:
-                            e = torch.randn_like(h).to(h.device)
-                            h = h + self.noise_loc + e * self.noise_scale
-                    prev_h[layer_no] = torch.cat(
-                        (h, prev_h[layer_no][batch_size:max_batch_size]))
+                        h = layer(x, prev_h[i][0:batch_size])
+                        h = self.add_noise_to(h)
+                    prev_h[i] = torch.cat(
+                        (h, prev_h[i][batch_size:max_batch_size]))
                     x = h
-                input_idx = input_idx + batch_size
+                input_idx += batch_size
 
             h = prev_h
             h = torch.stack(h)

@@ -74,15 +74,26 @@ class RnnSenderReinforce(nn.Module):
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
-    def forward(self, x):
-        prev_hidden = [self.agent(x)]
-        prev_hidden.extend([torch.zeros_like(prev_hidden[0])
-                            for _ in range(self.num_layers - 1)])
+    def sample_symbol_from(self, distr):
+        if self.training:
+            return distr.sample()
+        else:
+            return distr.probs.argmax(dim=1)
 
+    def add_noise_to(self, x):
+        if self.training:
+            e = torch.randn_like(x).to(x)
+            x = x + self.noise_loc + e * self.noise_scale
+        return x
+
+    def forward(self, x):
+        prev_h = [self.agent(x)]
+        prev_h.extend(
+            [torch.zeros_like(prev_h[0]) for _ in range(self.num_layers - 1)]
+        )
         prev_c = [
-            torch.zeros_like(
-                prev_hidden[0]) for _ in range(
-                self.num_layers)]  # only used for LSTM
+            torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
+        ]  # only used for LSTM
 
         input = torch.stack([self.sos_embedding] * x.size(0))
 
@@ -92,39 +103,24 @@ class RnnSenderReinforce(nn.Module):
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
-                if self.training:
-                    if isinstance(layer, nn.LSTMCell):
-                        e = torch.randn_like(prev_c[i]).to(prev_c[i].device)
-                        prev_c[i] = (
-                            prev_c[i] + self.noise_loc + e * self.noise_scale
-                        )
-                    else:
-                        e = torch.randn_like(
-                            prev_hidden[i]).to(
-                            prev_hidden[i].device)
-                        prev_hidden[i] = (
-                            prev_hidden[i] + self.noise_loc + e * self.noise_scale)
-
                 if isinstance(layer, nn.LSTMCell):
-                    h_t, c_t = layer(input, (prev_hidden[i], prev_c[i]))
+                    h_t, c_t = layer(input, (prev_h[i], prev_c[i]))
+                    c_t = self.add_noise_to(c_t)
                     prev_c[i] = c_t
                 else:
-                    h_t = layer(input, prev_hidden[i])
-                prev_hidden[i] = h_t
+                    h_t = layer(input, prev_h[i])
+                    h_t = self.add_noise_to(h_t)
+                prev_h[i] = h_t
                 input = h_t
 
-            step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
-            distr = Categorical(logits=step_logits)
-            entropy.append(distr.entropy())
-
-            if self.training:
-                x = distr.sample()
-            else:
-                x = step_logits.argmax(dim=1)
-            logits.append(distr.log_prob(x))
-
+            distr = Categorical(
+                logits=F.log_softmax(self.hidden_to_output(h_t), dim=1)
+            )
+            x = self.sample_symbol_from(distr)
             input = self.embedding(x)
             sequence.append(x)
+            logits.append(distr.log_prob(x))
+            entropy.append(distr.entropy())
 
         sequence = torch.stack(sequence).permute(1, 0)
         logits = torch.stack(logits).permute(1, 0)
@@ -132,7 +128,6 @@ class RnnSenderReinforce(nn.Module):
 
         if self.force_eos:
             zeros = torch.zeros((sequence.size(0), 1)).to(sequence.device)
-
             sequence = torch.cat([sequence, zeros.long()], dim=1)
             logits = torch.cat([logits, zeros], dim=1)
             entropy = torch.cat([entropy, zeros], dim=1)
