@@ -23,7 +23,7 @@ def find_lengths(
         )
         lengths = torch.zeros_like(stop_logprob)
         for i in range(max_len):
-            lengths[:, i] += np.log(float(i + 1))
+            lengths[:, i] += np.log(float(i))
             lengths[:, i] += logprob_to_stop[:, i]
             for j in range(i):
                 lengths[:, i] += logprob_not_to_stop[:, j]
