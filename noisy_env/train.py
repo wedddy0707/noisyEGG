@@ -281,8 +281,7 @@ def main(params):
             - lr as lr
             - sender_hidden as shid
             - receiver_hidden as rhid
-            - sender_symb_entropy_coeff as symbsentr
-            - sender_stop_entropy_coeff as stopsentr
+            - sender_entropy_coeff as sentr
             - length_cost as reg
             - max_len as max_len
             - sender_noise_scale as sscl
@@ -299,8 +298,7 @@ def main(params):
             f'_lr{opts.lr}' +
             f'_shid{opts.sender_hidden}' +
             f'_rhid{opts.receiver_hidden}' +
-            f'_symbsentr{opts.sender_symb_entropy_coeff}' +
-            f'_stopsentr{opts.sender_stop_entropy_coeff}' +
+            f'_sentr{opts.sender_entropy_coeff}' +
             f'_reg{opts.length_cost}' +
             f'_max_len{opts.max_len}' +
             f'_sscl{opts.sender_noise_scale}' +
