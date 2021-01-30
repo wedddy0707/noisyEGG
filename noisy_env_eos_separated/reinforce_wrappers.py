@@ -244,6 +244,8 @@ class SenderReceiverRnnReinforce(nn.Module):
             eff_logprob_s += stop_logprob_s[:, i] * not_stopped
             denom += ratio * not_stopped
             ratio *= self.sender_entropy_common_ratio
+        eff_symb_entropy_s = eff_symb_entropy_s / denom
+        eff_stop_entropy_s = eff_stop_entropy_s / denom
 
         logprob = eff_logprob_s + logprob_r
         entropy = (
