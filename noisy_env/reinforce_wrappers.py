@@ -188,89 +188,89 @@ class SenderReceiverRnnReinforce(nn.Module):
         self.sender_entropy_common_ratio = sender_entropy_common_ratio
         self.receiver_entropy_coeff = receiver_entropy_coeff
         self.loss = loss
-        self.length_cost = length_cost
-        self.machineguntalk_cost = machineguntalk_cost
+        self.len_cost = length_cost
+        self.mgt_cost = machineguntalk_cost
 
         self.channel = channel
 
         self.baselines = defaultdict(baseline_type)
 
     def forward(self, sender_input, labels, receiver_input=None):
-        message, log_prob_s, entropy_s = self.sender(sender_input)
+        ##############################
+        # Sender Forward Propagation #
+        ##############################
+        message, logprob_s, entropy_s = self.sender(sender_input)
 
+        ###########
+        # Channel #
+        ###########
         if self.training:
             message = self.channel(message)
 
-        message_lengths = find_lengths(message)
-        receiver_output, log_prob_r, entropy_r = self.receiver(
-            message, receiver_input, message_lengths)
+        ##########################
+        # Calculation of Lengths #
+        ##########################
+        lengths = find_lengths(message)
+        max_len = message.size(1)
 
+        ################################
+        # Receiver Forward Propagation #
+        ################################
+        receiver_output, logprob_r, entropy_r = self.receiver(
+            message, receiver_input, lengths)
+
+        ############################################
+        # Calculation of Effective Entropy/Logprob #
+        ############################################
+        effective_entropy_s = torch.zeros_like(entropy_r)
+        effective_logprob_s = torch.zeros_like(logprob_r)
+        ratio = 1.0
+        denom = torch.zeros_like(lengths).float()
+        for i in range(max_len):
+            not_eosed = (i < lengths).float()
+            effective_entropy_s += entropy_s[:, i] * not_eosed * ratio
+            effective_logprob_s += logprob_s[:, i] * not_eosed
+            denom += ratio * not_eosed
+            ratio *= self.sender_entropy_common_ratio
+        effective_entropy_s = effective_entropy_s / denom
+
+        logprob = effective_logprob_s + logprob_r
+        entropy = (
+            effective_entropy_s.mean() * self.sender_entropy_coeff +
+            entropy_r.mean() * self.receiver_entropy_coeff
+        )
+
+        #######################
+        # Calculation of Loss #
+        #######################
         loss, rest = self.loss(
             sender_input, message, receiver_input, receiver_output, labels)
+        # Auxiliary losses
+        len_loss = lengths.float() * self.len_cost
+        mgt_loss = (lengths == max_len).float() * self.mgt_cost
 
-        # the entropy of the outputs of S before and including the eos symbol -
-        # as we don't care about what's after
-        effective_entropy_s = torch.zeros_like(entropy_r)
-
-        # the log prob of the choices made by S before and including the eos symbol - again, we don't
-        # care about the rest
-        effective_log_prob_s = torch.zeros_like(log_prob_r)
-
-        # decayed_ratio:
-        #   the ratio of sender entropy's weight at each time step
-        # decayed_denom:
-        #   the denominator for the weighted mean of sender entropy
-        decayed_ratio = 1.0
-        decayed_denom = torch.zeros_like(message_lengths).float()
-        for i in range(message.size(1)):
-            not_eosed = (i < message_lengths).float()
-            effective_entropy_s += entropy_s[:, i] * decayed_ratio * not_eosed
-            effective_log_prob_s += log_prob_s[:, i] * not_eosed
-            decayed_denom += decayed_ratio * not_eosed
-            # update decayed_ratio geometrically
-            decayed_ratio = decayed_ratio * self.sender_entropy_common_ratio
-        effective_entropy_s = effective_entropy_s / decayed_denom
-
-        weighted_entropy = effective_entropy_s.mean() * self.sender_entropy_coeff + \
-            entropy_r.mean() * self.receiver_entropy_coeff
-
-        log_prob = effective_log_prob_s + log_prob_r
-
-        length_loss = message_lengths.float() * self.length_cost
-
-        policy_length_loss = (
-            (length_loss -
-             self.baselines['length'].predict(length_loss)) *
-            effective_log_prob_s).mean()
-        policy_loss = (
-            (loss.detach() -
-             self.baselines['loss'].predict(
-                loss.detach())) *
-            log_prob).mean()
-
-        # my new loss
-        machineguntalk_loss = (
-            (message_lengths == message.size(1)).float() *
-            self.machineguntalk_cost)
-        policy_machineguntalk_loss = (
-            (machineguntalk_loss -
-             self.baselines['machineguntalk'].predict(machineguntalk_loss)) *
-            effective_log_prob_s).mean()
+        policy_loss = ((
+            loss.detach() - self.baselines['loss'].predict(loss.detach())
+        ) * logprob).mean()
+        policy_len_loss = ((
+            len_loss - self.baselines['len'].predict(len_loss)
+        ) * effective_logprob_s).mean()
+        policy_mgt_loss = ((
+            mgt_loss - self.baselines['mgt'].predict(mgt_loss)
+        ) * effective_logprob_s).mean()
 
         optimized_loss = (
-            policy_machineguntalk_loss +
-            policy_length_loss +
-            policy_loss -
-            weighted_entropy
+            loss.mean() +
+            policy_loss +
+            policy_len_loss +
+            policy_mgt_loss -
+            entropy
         )
-        # if the receiver is deterministic/differentiable, we apply the actual
-        # loss
-        optimized_loss += loss.mean()
 
         if self.training:
             self.baselines['loss'].update(loss)
-            self.baselines['length'].update(length_loss)
-            self.baselines['machineguntalk'].update(machineguntalk_loss)
+            self.baselines['len'].update(len_loss)
+            self.baselines['mgt'].update(mgt_loss)
 
         for k, v in rest.items():
             rest[k] = v.mean().item() if hasattr(v, 'mean') else v
@@ -278,6 +278,6 @@ class SenderReceiverRnnReinforce(nn.Module):
         rest['sender_entropy'] = entropy_s.mean().item()
         rest['receiver_entropy'] = entropy_r.mean().item()
         rest['original_loss'] = loss.mean().item()
-        rest['mean_length'] = message_lengths.float().mean().item()
+        rest['mean_length'] = lengths.float().mean().item()
 
         return optimized_loss, rest
