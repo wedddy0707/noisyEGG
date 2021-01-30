@@ -77,12 +77,16 @@ def get_params(params):
         type=str,
         default='rnn',
         help='Type of the model used for Receiver {rnn, gru, lstm} (default: rnn)')
-
     parser.add_argument(
-        '--sender_entropy_coeff',
+        '--sender_symb_entropy_coeff',
         type=float,
         default=1e-1,
-        help='The entropy regularisation coefficient for Sender (default: 1e-1)')
+        help='The entropy regularisation coefficient for Sender\'s symbol distr (default: 1e-1)')
+    parser.add_argument(
+        '--sender_stop_entropy_coeff',
+        type=float,
+        default=1e-1,
+        help='The entropy regularisation coefficient for Sender\' stop distr (default: 1e-1)')
     parser.add_argument(
         '--receiver_entropy_coeff',
         type=float,
@@ -278,7 +282,8 @@ def main(params):
         sender,
         receiver,
         loss,
-        sender_entropy_coeff=opts.sender_entropy_coeff,
+        sender_symb_entropy_coeff=opts.sender_symb_entropy_coeff,
+        sender_stop_entropy_coeff=opts.sender_stop_entropy_coeff,
         receiver_entropy_coeff=opts.receiver_entropy_coeff,
         length_cost=opts.length_cost,
         machineguntalk_cost=opts.machineguntalk_cost,

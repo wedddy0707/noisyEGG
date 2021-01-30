@@ -175,7 +175,8 @@ class SenderReceiverRnnReinforce(nn.Module):
                  sender,
                  receiver,
                  loss,
-                 sender_entropy_coeff,
+                 sender_symb_entropy_coeff,
+                 sender_stop_entropy_coeff,
                  receiver_entropy_coeff,
                  length_cost=0.0,
                  machineguntalk_cost=0.0,
@@ -186,7 +187,8 @@ class SenderReceiverRnnReinforce(nn.Module):
         super(SenderReceiverRnnReinforce, self).__init__()
         self.sender = sender
         self.receiver = receiver
-        self.sender_entropy_coeff = sender_entropy_coeff
+        self.sender_symb_entropy_coeff = sender_symb_entropy_coeff
+        self.sender_stop_entropy_coeff = sender_stop_entropy_coeff
         self.sender_entropy_common_ratio = sender_entropy_common_ratio
         self.receiver_entropy_coeff = receiver_entropy_coeff
         self.loss = loss
@@ -229,23 +231,24 @@ class SenderReceiverRnnReinforce(nn.Module):
         ############################################
         # Calculation of Effective logprob/entropy #
         ############################################
-        effective_entropy_s = torch.zeros_like(entropy_r)
-        effective_logprob_s = torch.zeros_like(logprob_r)
+        eff_symb_entropy_s = torch.zeros_like(entropy_r)
+        eff_stop_entropy_s = torch.zeros_like(entropy_r)
+        eff_logprob_s = torch.zeros_like(logprob_r)
         denom = torch.zeros_like(lengths).float()
         ratio = 1.0
         for i in range(symb_seq_s.size(1)):
             not_stopped = (i < lengths).float()
-            effective_entropy_s += symb_entropy_s[:, i] * not_stopped * ratio
-            effective_entropy_s += stop_entropy_s[:, i] * not_stopped * ratio
-            effective_logprob_s += symb_logprob_s[:, i] * not_stopped
-            effective_logprob_s += stop_logprob_s[:, i] * not_stopped
+            eff_symb_entropy_s += symb_entropy_s[:, i] * not_stopped * ratio
+            eff_stop_entropy_s += stop_entropy_s[:, i] * not_stopped * ratio
+            eff_logprob_s += symb_logprob_s[:, i] * not_stopped
+            eff_logprob_s += stop_logprob_s[:, i] * not_stopped
             denom += ratio * not_stopped
             ratio *= self.sender_entropy_common_ratio
-        effective_entropy_s = effective_entropy_s / denom
 
-        logprob = effective_logprob_s + logprob_r
+        logprob = eff_logprob_s + logprob_r
         entropy = (
-            effective_entropy_s.mean() * self.sender_entropy_coeff +
+            eff_symb_entropy_s.mean() * self.sender_symb_entropy_coeff +
+            eff_stop_entropy_s.mean() * self.sender_stop_entropy_coeff +
             entropy_r.mean() * self.receiver_entropy_coeff
         )
 
@@ -262,9 +265,9 @@ class SenderReceiverRnnReinforce(nn.Module):
             self.baselines['loss'].predict(loss.detach())
         policy_loss = (policy_loss * logprob).mean()
         policy_len_loss = len_loss - self.baselines['len'].predict(len_loss)
-        policy_len_loss = (policy_len_loss * effective_logprob_s).mean()
+        policy_len_loss = (policy_len_loss * eff_logprob_s).mean()
         policy_mgt_loss = mgt_loss - self.baselines['mgt'].predict(mgt_loss)
-        policy_mgt_loss = (policy_mgt_loss * effective_logprob_s).mean()
+        policy_mgt_loss = (policy_mgt_loss * eff_logprob_s).mean()
 
         optimized_loss = (
             loss.mean() +
