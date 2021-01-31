@@ -88,6 +88,7 @@ class RnnSenderReinforce(nn.Module):
         return x
 
     def forward(self, x):
+        batch_size = x.size(0)
         prev_h = [self.agent(x)]
         prev_h.extend(
             [torch.zeros_like(prev_h[0]) for _ in range(self.num_layers - 1)]
@@ -96,7 +97,7 @@ class RnnSenderReinforce(nn.Module):
             torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
         ]  # only used for LSTM
 
-        input = self.clk_embedding(0)
+        input = self.clk_embedding(torch.tensor([0] * batch_size))
 
         sequence = []
         logits = []
@@ -118,7 +119,10 @@ class RnnSenderReinforce(nn.Module):
                 logits=F.log_softmax(self.hidden_to_output(h_t), dim=1)
             )
             x = self.sample_symbol_from(distr)
-            input = self.embedding(x) + self.clk_embedding(step)
+            input = (
+                self.embedding(x) +
+                self.clk_embedding(torch.tensor([step] * batch_size))
+            )
             sequence.append(x)
             logits.append(distr.log_prob(x))
             entropy.append(distr.entropy())
