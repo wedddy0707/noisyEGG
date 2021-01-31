@@ -127,7 +127,7 @@ class RnnSenderReinforce(nn.Module):
 
             clk_loss = F.cross_entropy(
                 input=self.hidden_to_clock(h_t),
-                target=torch.tensor([step] * batch_size) % 4
+                target=torch.tensor([step] * batch_size).to(x.device) % 4
             )
 
         sequence = torch.stack(sequence).permute(1, 0)
