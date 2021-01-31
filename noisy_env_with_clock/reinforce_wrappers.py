@@ -41,9 +41,8 @@ class RnnSenderReinforce(nn.Module):
 
         self.hidden_to_output = nn.Linear(hidden_size, vocab_size)
         self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.sos_embedding = nn.Parameter(torch.zeros(embed_dim))
-        self.clk_embedding = nn.Parameter(
-            torch.zeros((self.max_len, embed_dim)))
+        self.clk_embedding = nn.Embedding(self.max_len, embed_dim)
+        # self.sos_embedding = nn.Parameter(torch.zeros(embed_dim))
         self.embed_dim = embed_dim
         self.vocab_size = vocab_size
         self.num_layers = num_layers
@@ -65,17 +64,16 @@ class RnnSenderReinforce(nn.Module):
         self.cells = nn.ModuleList(
             [
                 cell_type(
-                    input_size=embed_dim * 2,
+                    input_size=embed_dim,
                     hidden_size=hidden_size) if i == 0 else cell_type(
                     input_size=hidden_size,
                     hidden_size=hidden_size) for i in range(
                     self.num_layers)])
 
-        self.reset_parameters()
+        # self.reset_parameters()
 
-    def reset_parameters(self):
-        nn.init.normal_(self.sos_embedding, 0.0, 0.01)
-        nn.init.normal_(self.clk_embedding, 0.0, 0.01)
+    # def reset_parameters(self):
+    #     nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
     def sample_symbol_from(self, distr):
         if self.training:
@@ -99,10 +97,7 @@ class RnnSenderReinforce(nn.Module):
             torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
         ]  # only used for LSTM
 
-        input = torch.cat([
-            torch.stack([self.sos_embedding] * batch_size),
-            torch.stack([self.clk_embedding[0]] * batch_size)
-        ], dim=1)
+        input = self.clk_embedding(torch.tensor([0] * batch_size).to(x.device))
 
         sequence = []
         logits = []
@@ -124,10 +119,12 @@ class RnnSenderReinforce(nn.Module):
                 logits=F.log_softmax(self.hidden_to_output(h_t), dim=1)
             )
             x = self.sample_symbol_from(distr)
-            input = torch.cat([
-                self.embedding(x),
-                torch.stack([self.clk_embedding[step]] * batch_size)
-            ], dim=1)
+            input = (
+                self.embedding(x) +
+                self.clk_embedding(
+                    torch.tensor([step] * batch_size).to(x.device)
+                )
+            )
             sequence.append(x)
             logits.append(distr.log_prob(x))
             entropy.append(distr.entropy())
