@@ -40,9 +40,10 @@ class RnnSenderReinforce(nn.Module):
             self.max_len -= 1
 
         self.hidden_to_output = nn.Linear(hidden_size, vocab_size)
+        self.hidden_to_clock = nn.Linear(hidden_size, 4)
         self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.clk_embedding = nn.Embedding(self.max_len, embed_dim)
-        # self.sos_embedding = nn.Parameter(torch.zeros(embed_dim))
+        # self.clk_embedding = nn.Embedding(self.max_len, embed_dim)
+        self.sos_embedding = nn.Parameter(torch.zeros(embed_dim))
         self.embed_dim = embed_dim
         self.vocab_size = vocab_size
         self.num_layers = num_layers
@@ -70,10 +71,10 @@ class RnnSenderReinforce(nn.Module):
                     hidden_size=hidden_size) for i in range(
                     self.num_layers)])
 
-        # self.reset_parameters()
+        self.reset_parameters()
 
-    # def reset_parameters(self):
-    #     nn.init.normal_(self.sos_embedding, 0.0, 0.01)
+    def reset_parameters(self):
+        nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
     def sample_symbol_from(self, distr):
         if self.training:
@@ -97,7 +98,7 @@ class RnnSenderReinforce(nn.Module):
             torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
         ]  # only used for LSTM
 
-        input = self.clk_embedding(torch.tensor([0] * batch_size).to(x.device))
+        input = torch.stack([self.sos_embedding] * batch_size)
 
         sequence = []
         logits = []
@@ -119,15 +120,15 @@ class RnnSenderReinforce(nn.Module):
                 logits=F.log_softmax(self.hidden_to_output(h_t), dim=1)
             )
             x = self.sample_symbol_from(distr)
-            input = (
-                self.embedding(x) +
-                self.clk_embedding(
-                    torch.tensor([step] * batch_size).to(x.device)
-                )
-            )
+            input = self.embedding(x)
             sequence.append(x)
             logits.append(distr.log_prob(x))
             entropy.append(distr.entropy())
+
+            clk_loss = F.cross_entropy(
+                input=self.hidden_to_clock(h_t),
+                target=torch.tensor([step] * batch_size) % 4
+            )
 
         sequence = torch.stack(sequence).permute(1, 0)
         logits = torch.stack(logits).permute(1, 0)
@@ -139,7 +140,7 @@ class RnnSenderReinforce(nn.Module):
             logits = torch.cat([logits, zeros], dim=1)
             entropy = torch.cat([entropy, zeros], dim=1)
 
-        return sequence, logits, entropy
+        return sequence, logits, entropy, clk_loss
 
 
 class RnnReceiverDeterministic(nn.Module):
@@ -206,7 +207,7 @@ class SenderReceiverRnnReinforce(nn.Module):
         ##############################
         # Sender Forward Propagation #
         ##############################
-        message, logprob_s, entropy_s = self.sender(sender_input)
+        message, logprob_s, entropy_s, aux_loss_s = self.sender(sender_input)
 
         ###########
         # Channel #
@@ -268,6 +269,7 @@ class SenderReceiverRnnReinforce(nn.Module):
 
         optimized_loss = (
             loss.mean() +
+            aux_loss_s.mean() +
             policy_loss +
             policy_len_loss +
             policy_mgt_loss -
