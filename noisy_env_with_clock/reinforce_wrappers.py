@@ -97,7 +97,7 @@ class RnnSenderReinforce(nn.Module):
             torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
         ]  # only used for LSTM
 
-        input = self.clk_embedding(torch.tensor([0] * batch_size))
+        input = self.clk_embedding(torch.tensor([0] * batch_size).to(x.device))
 
         sequence = []
         logits = []
@@ -121,7 +121,9 @@ class RnnSenderReinforce(nn.Module):
             x = self.sample_symbol_from(distr)
             input = (
                 self.embedding(x) +
-                self.clk_embedding(torch.tensor([step] * batch_size))
+                self.clk_embedding(
+                    torch.tensor([step] * batch_size).to(x.device)
+                )
             )
             sequence.append(x)
             logits.append(distr.log_prob(x))
