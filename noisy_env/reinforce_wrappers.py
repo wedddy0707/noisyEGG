@@ -31,9 +31,7 @@ class RnnSenderReinforce(nn.Module):
     ):
         super(RnnSenderReinforce, self).__init__()
         self.agent = agent
-
         self.force_eos = force_eos
-
         self.max_len = max_len
         if force_eos:
             assert self.max_len > 1, "Cannot force eos when max_len is below 1"
@@ -42,34 +40,34 @@ class RnnSenderReinforce(nn.Module):
         self.hidden_to_output = nn.Linear(hidden_size, vocab_size)
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.sos_embedding = nn.Parameter(torch.zeros(embed_dim))
-        self.embed_dim = embed_dim
         self.vocab_size = vocab_size
         self.num_layers = num_layers
-        self.cells = None
 
         self.noise_loc = noise_loc
         self.noise_scale = noise_scale
 
+        self.init_cells(cell, embed_dim, hidden_size, num_layers)
+        self.reset_parameters()
+
+    def init_cells(self, cell, embed_dim, hidden_size, num_layers):
         cell = cell.lower()
         cell_types = {
             'rnn': nn.RNNCell,
             'gru': nn.GRUCell,
-            'lstm': nn.LSTMCell}
-
+            'lstm': nn.LSTMCell
+        }
         if cell not in cell_types:
             raise ValueError(f"Unknown RNN Cell: {cell}")
-
-        cell_type = cell_types[cell]
-        self.cells = nn.ModuleList(
-            [
-                cell_type(
-                    input_size=embed_dim,
-                    hidden_size=hidden_size) if i == 0 else cell_type(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size) for i in range(
-                    self.num_layers)])
-
-        self.reset_parameters()
+        self.cells = nn.ModuleList([
+            cell_types[cell](
+                input_size=embed_dim,
+                hidden_size=hidden_size
+            ) if i == 0 else cell_types[cell](
+                input_size=hidden_size,
+                hidden_size=hidden_size
+            ) for i in range(num_layers)
+        ])
+        self.isLSTM = (cell == 'lstm')
 
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
@@ -88,9 +86,9 @@ class RnnSenderReinforce(nn.Module):
 
     def forward(self, x):
         prev_h = [self.agent(x)]
-        prev_h.extend(
-            [torch.zeros_like(prev_h[0]) for _ in range(self.num_layers - 1)]
-        )
+        prev_h.extend([
+            torch.zeros_like(prev_h[0]) for _ in range(self.num_layers - 1)
+        ])
         prev_c = [
             torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
         ]  # only used for LSTM
@@ -103,7 +101,7 @@ class RnnSenderReinforce(nn.Module):
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
-                if isinstance(layer, nn.LSTMCell):
+                if self.isLSTM:
                     h_t, c_t = layer(input, (prev_h[i], prev_c[i]))
                     c_t = self.add_noise_to(c_t)
                     prev_c[i] = c_t
