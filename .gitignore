@@ -10,3 +10,6 @@ noisy_env_eos_separated/__pycache__/util.cpython-37.pyc
 noisy_env/__pycache__/channel.cpython-37.pyc
 noisy_env/__pycache__/reinforce_wrappers.cpython-37.pyc
 noisy_env/__pycache__/rnn.cpython-37.pyc
+noisy_env_with_clock/__pycache__/channel.cpython-37.pyc
+noisy_env_with_clock/__pycache__/reinforce_wrappers.cpython-37.pyc
+noisy_env_with_clock/__pycache__/rnn.cpython-37.pyc
