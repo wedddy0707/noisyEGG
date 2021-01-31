@@ -70,10 +70,10 @@ class RnnSenderReinforce(nn.Module):
                     hidden_size=hidden_size) for i in range(
                     self.num_layers)])
 
-        self.reset_parameters()
+        # self.reset_parameters()
 
-    def reset_parameters(self):
-        nn.init.normal_(self.sos_embedding, 0.0, 0.01)
+    # def reset_parameters(self):
+    #     nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
     def sample_symbol_from(self, distr):
         if self.training:
