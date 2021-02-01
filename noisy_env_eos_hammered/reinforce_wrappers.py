@@ -106,7 +106,7 @@ class RnnSenderReinforce(nn.Module):
             step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
             distr = Categorical(logits=step_logits)
             if self.force_eos and step == self.max_len - 1:
-                x = torch.tensor([0] * distr.probs.size(0))
+                x = torch.tensor([0] * distr.probs.size(0)).to(h_t.device)
             elif self.training:
                 x = distr.sample()
             else:
