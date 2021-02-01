@@ -45,10 +45,6 @@ class RnnSenderReinforce(nn.Module):
         self.noise_loc = noise_loc
         self.noise_scale = noise_scale
 
-        self.init_cells(cell, embed_dim, hidden_size, num_layers)
-        self.reset_parameters()
-
-    def init_cells(self, cell, embed_dim, hidden_size, num_layers):
         cell = cell.lower()
         cell_types = {
             'rnn': nn.RNNCell,
@@ -67,23 +63,10 @@ class RnnSenderReinforce(nn.Module):
             ) for i in range(num_layers)
         ])
         self.isLSTM = (cell == 'lstm')
+        self.reset_parameters()
 
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
-
-    def sample_symbol_from(self, distr, logits, last_step=False):
-        if self.force_eos and last_step:
-            return torch.tensor([0] * distr.probs.size(0))
-        elif self.training:
-            return distr.sample()
-        else:
-            return logits.argmax(dim=1)
-
-    def add_noise_to(self, x):
-        if self.training:
-            e = torch.randn_like(x).to(x)
-            x = x + self.noise_loc + e * self.noise_scale
-        return x
 
     def forward(self, x):
         prev_h = [self.agent(x)]
@@ -104,21 +87,30 @@ class RnnSenderReinforce(nn.Module):
             for i, layer in enumerate(self.cells):
                 if self.isLSTM:
                     h_t, c_t = layer(input, (prev_h[i], prev_c[i]))
-                    c_t = self.add_noise_to(c_t)
+                    e_t = torch.randn_like(c_t).to(c_t)
+                    c_t = (
+                        c_t + self.noise_loc +
+                        e_t * float(self.training) * self.noise_scale
+                    )
                     prev_c[i] = c_t
                 else:
                     h_t = layer(input, prev_h[i])
-                    h_t = self.add_noise_to(h_t)
+                    e_t = torch.randn_like(h_t).to(h_t)
+                    h_t = (
+                        h_t + self.noise_loc +
+                        e_t * float(self.training) * self.noise_scale
+                    )
                 prev_h[i] = h_t
                 input = h_t
 
             step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
             distr = Categorical(logits=step_logits)
-            x = self.sample_symbol_from(
-                distr,
-                step_logits,
-                last_step=(step == self.max_len - 1),
-            )
+            if self.force_eos and step == self.max_len - 1:
+                x = torch.tensor([0] * distr.probs.size(0))
+            elif self.training:
+                x = distr.sample()
+            else:
+                x = logits.argmax(dim=1)
             input = self.embedding(x)
             sequence.append(x)
             logits.append(distr.log_prob(x))
