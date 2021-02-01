@@ -71,13 +71,13 @@ class RnnSenderReinforce(nn.Module):
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
-    def sample_symbol_from(self, distr, last_step=False):
+    def sample_symbol_from(self, distr, logits, last_step=False):
         if self.force_eos and last_step:
             return torch.tensor([0] * distr.probs.size(0))
         elif self.training:
             return distr.sample()
         else:
-            return distr.probs.argmax(dim=1)
+            return logits.argmax(dim=1)
 
     def add_noise_to(self, x):
         if self.training:
@@ -112,11 +112,11 @@ class RnnSenderReinforce(nn.Module):
                 prev_h[i] = h_t
                 input = h_t
 
-            distr = Categorical(
-                logits=F.log_softmax(self.hidden_to_output(h_t), dim=1)
-            )
+            step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
+            distr = Categorical(logits=step_logits)
             x = self.sample_symbol_from(
                 distr,
+                step_logits,
                 last_step=(step == self.max_len - 1),
             )
             input = self.embedding(x)
