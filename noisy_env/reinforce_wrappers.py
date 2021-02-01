@@ -113,7 +113,8 @@ class RnnSenderReinforce(nn.Module):
 
             step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
             distr = Categorical(logits=step_logits)
-            x = self.sample_symbol_from(distr, step_logits)
+            # x = self.sample_symbol_from(distr, step_logits)
+            x = distr.sample() if self.training else step_logits.argmax(dim=1)
             input = self.embedding(x)
             sequence.append(x)
             logits.append(distr.log_prob(x))
