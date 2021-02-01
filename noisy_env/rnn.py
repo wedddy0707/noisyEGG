@@ -40,12 +40,6 @@ class NoisyCell(nn.Module):
             cell_type[cell](input_size=embed_dim, hidden_size=n_hidden) if i == 0 else
             cell_type[cell](input_size=n_hidden, hidden_size=n_hidden) for i in range(num_layers)])
 
-    def add_noise_to(self, x):
-        if self.training:
-            e = torch.randn_like(x).to(x.device)
-            x = self.noise_loc + e * self.noise_scale
-        return x
-
     def forward(self, input: torch.Tensor, h_0: Optional[torch.Tensor] = None):
         is_packed = isinstance(input, torch.nn.utils.rnn.PackedSequence)
         if is_packed:
@@ -71,12 +65,20 @@ class NoisyCell(nn.Module):
                     if self.isLSTM:
                         h, c = layer(
                             x, (prev_h[i][0:batch_size], prev_c[i][0:batch_size]))
-                        c = self.add_noise_to(c)
+                        e = torch.randn_like(c).to(c.device)
+                        c = (
+                            c + self.noise_loc +
+                            e * float(self.training) * self.noise_scale
+                        )
                         prev_c[i] = torch.cat(
                             (c, prev_c[i][batch_size:max_batch_size]))
                     else:
                         h = layer(x, prev_h[i][0:batch_size])
-                        h = self.add_noise_to(h)
+                        e = torch.randn_like(h).to(h.device)
+                        h = (
+                            h + self.noise_loc +
+                            e * float(self.training) * self.noise_scale
+                        )
                     prev_h[i] = torch.cat(
                         (h, prev_h[i][batch_size:max_batch_size]))
                     x = h
