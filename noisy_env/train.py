@@ -5,7 +5,6 @@
 
 import argparse
 import numpy as np
-import torch.utils.data
 
 import egg.core as core
 from egg.core import EarlyStopperAccuracy
@@ -21,6 +20,7 @@ from common import Channel                     # noqa: E402
 from common import RnnSenderReinforce          # noqa: E402
 from common import RnnReceiverDeterministic    # noqa: E402
 from common import SenderReceiverRnnReinforce  # noqa: E402
+from common import suffix_test                 # noqa: E402
 
 
 def get_params(params):
@@ -146,51 +146,6 @@ def get_params(params):
     args = core.init(parser, params)
 
     return args
-
-
-def suffix_test(game, n_features, device, add_eos=False):
-    '''
-    - add_eos: whether to add eos to each prefix
-    '''
-    train_state = game.training  # persist so we restore it back
-    game.eval()
-
-    prediction_history = []
-    with torch.no_grad():
-        input = torch.eye(n_features).to(device)
-        message = game.sender(input)  # Sender
-        message = message[0]
-        max_len = message.size(1)
-        for length in range(max_len):
-            prefix = message[:, 0:length + 1]
-            if add_eos:
-                eos = torch.zeros(prefix.size(0), 1, dtype=int).to(device)
-                prefix = torch.cat((prefix, eos), dim=1)
-            output = game.receiver(prefix)  # Receiver
-            output = output[0]
-            output = output.argmax(dim=1)  # max(dim=1).values
-            prediction_history.append(output)
-        prediction_history = torch.stack(prediction_history).permute(1, 0)
-
-        for i in range(input.size(0)):
-            input_symbol = input[i].argmax().item()
-            for length in range(max_len):
-                prefix = message[i, 0:length + 1]
-                eosed = (message[i, length] == 0)
-                if add_eos:
-                    eos = torch.zeros(1, dtype=int).to(device)
-                    prefix = torch.cat((prefix, eos), dim=0)
-                prediction = prediction_history[i][length].item()
-                if add_eos:
-                    prefix_type = 'prefix_with_eos'
-                else:
-                    prefix_type = 'prefix_witout_eos'
-                print(
-                    f'input: {input_symbol} -> {prefix_type}: {",".join([str(x.item()) for x in prefix])} -> prediction: {prediction}',
-                    flush=True)
-                if eosed:
-                    break
-    game.train(mode=train_state)
 
 
 def main(params):
