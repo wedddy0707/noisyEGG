@@ -14,11 +14,16 @@ from egg.zoo.channel.features import OneHotLoader, UniformLoader
 from egg.zoo.channel.archs import Sender, Receiver
 from egg.zoo.channel.train import loss
 
-from channel import Channel
-from reinforce_wrappers import RnnSenderReinforce
-from reinforce_wrappers import RnnReceiverDeterministic
-from reinforce_wrappers import SenderReceiverRnnReinforce
 from util import find_lengths
+from reinforce_wrappers import RnnSenderReinforce
+from reinforce_wrappers import SenderReceiverRnnReinforce
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from common import Channel                     # noqa: E402
+from common import RnnReceiverDeterministic    # noqa: E402
 
 
 def get_params(params):
@@ -156,22 +161,25 @@ def suffix_test(game, n_features, device):
 
     with torch.no_grad():
         inputs = torch.eye(n_features).to(device)
-        seq, _, _ = game.sender(inputs)
-        messages, stop_seq = seq
-        lengths = find_lengths(stop_seq)
+        sender_output = game.sender(inputs)
+        messages = sender_output[0]
+        stop_seq = sender_output[1]
 
-        for i, m, ln in zip(inputs, messages, lengths):
-            i_symbol = i.argmax().item()
-            for m_idx in range(ln.item()):
-                p = torch.stack([m[0:m_idx + 1]])
-                o, _, _ = game.receiver(p, None, torch.tensor([m_idx + 1]))
-                o_symbol = o.argmax().item()
+        for i, m, stop in zip(inputs, messages, stop_seq):
+            for m_idx in range(m.size(0)):
+                prefix = m[0:m_idx + 1]
+                o = game.receiver(torch.stack([prefix]), lengths=torch.tensor([m_idx + 1]))
+                o = o[0]
 
                 dump_message = (
-                    f'input: {i_symbol} -> '
-                    f'message: {",".join([str(p[0,i].item()) for i in range(m_idx + 1)])} -> '
-                    f'output: {o_symbol}')
+                    f'input: {i.argmax().item()} -> '
+                    f'prefix: {",".join([str(prefix[i].item()) for i in range(prefix.size(0))])} -> '
+                    f'output: {o.argmax().item()}'
+                )
                 print(dump_message, flush=True)
+
+                if stop[m_idx].item():
+                    break
 
     game.train(mode=train_state)
 
@@ -182,8 +190,9 @@ def dump(game, n_features, device):
     train_state = game.training  # persist so we restore it back
     game.eval()
 
-    seq, _, _ = game.sender(inputs)
-    messages, stop_seq = seq
+    sender_output = game.sender(inputs)
+    messages = sender_output[0]
+    stop_seq = sender_output[1]
     lengths = find_lengths(stop_seq)
     outputs, _, _ = game.receiver(messages, None, lengths)
 
@@ -205,7 +214,8 @@ def dump(game, n_features, device):
         dump_message = (
             f'input: {i_symbol.item()} -> '
             f'message: {",".join([str(m[i].item()) for i in range(ln.item())])} -> '
-            f'output: {o_symbol.item()}')
+            f'output: {o_symbol.item()}'
+        )
         print(dump_message, flush=True)
 
     uniform_acc /= n_features

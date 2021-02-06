@@ -11,7 +11,6 @@ from torch.distributions import Categorical, Bernoulli
 
 from egg.core.baselines import MeanBaseline
 
-from rnn import RnnEncoder      # Note that this 'rnn' is not the file in EGG
 from util import find_lengths  # Note that this 'utils' is not the file in EGG
 
 
@@ -67,19 +66,14 @@ class RnnSenderReinforce(nn.Module):
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
-    def add_noise(self, x):
-        e = torch.randn_like(x).to(x.device)
-        return x + self.noise_loc + e * self.noise_scale
-
     def forward(self, x):
-        prev_hidden = [self.agent(x)]
-        prev_hidden.extend([torch.zeros_like(prev_hidden[0])
-                            for _ in range(self.num_layers - 1)])
-
+        prev_h = [self.agent(x)]
+        prev_h.extend([
+            torch.zeros_like(prev_h[0]) for _ in range(self.num_layers - 1)
+        ])
         prev_c = [
-            torch.zeros_like(
-                prev_hidden[0]) for _ in range(
-                self.num_layers)]  # only used for LSTM
+            torch.zeros_like(prev_h[0]) for _ in range(self.num_layers)
+        ]  # only used for LSTM
 
         input = torch.stack([self.sos_embedding] * x.size(0))
 
@@ -92,18 +86,18 @@ class RnnSenderReinforce(nn.Module):
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
-                if self.training:
-                    if isinstance(layer, nn.LSTMCell):
-                        prev_c[i] = self.add_noise(prev_c[i])
-                    else:
-                        prev_hidden[i] = self.add_noise(prev_hidden[i])
-
+                e_t = float(self.training) * (
+                    self.noise_loc +
+                    self.noise_scale * torch.randn_like(prev_h[0]).to(prev_h[0])
+                )
                 if isinstance(layer, nn.LSTMCell):
-                    h_t, c_t = layer(input, (prev_hidden[i], prev_c[i]))
+                    h_t, c_t = layer(input, (prev_h[i], prev_c[i]))
+                    c_t = c_t + e_t
                     prev_c[i] = c_t
                 else:
-                    h_t = layer(input, prev_hidden[i])
-                prev_hidden[i] = h_t
+                    h_t = layer(input, prev_h[i])
+                    h_t = h_t + e_t
+                prev_h[i] = h_t
                 input = h_t
 
             symb_probs = F.softmax(self.output_symbol(h_t), dim=1)
@@ -130,44 +124,10 @@ class RnnSenderReinforce(nn.Module):
         symb_entropy = torch.stack(symb_entropy).permute(1, 0)
         stop_entropy = torch.stack(stop_entropy).permute(1, 0)
 
-        sequence = (symb_seq, stop_seq)
         logits = (symb_logits, stop_logits)
         entropy = (symb_entropy, stop_entropy)
 
-        return sequence, logits, entropy
-
-
-class RnnReceiverDeterministic(nn.Module):
-    def __init__(self,
-                 agent,
-                 vocab_size,
-                 embed_dim,
-                 hidden_size,
-                 cell='rnn',
-                 num_layers=1,
-                 noise_loc=0.0,
-                 noise_scale=0.0,
-                 ):
-        super(RnnReceiverDeterministic, self).__init__()
-        self.agent = agent
-        self.encoder = RnnEncoder(
-            vocab_size,
-            embed_dim,
-            hidden_size,
-            cell,
-            num_layers,
-            noise_loc=noise_loc,
-            noise_scale=noise_scale,
-        )
-
-    def forward(self, message, input=None, lengths=None):
-        encoded = self.encoder(message)
-        agent_output = self.agent(encoded, input)
-
-        logits = torch.zeros(agent_output.size(0)).to(agent_output.device)
-        entropy = logits
-
-        return agent_output, logits, entropy
+        return symb_seq, stop_seq, logits, entropy
 
 
 class SenderReceiverRnnReinforce(nn.Module):
@@ -203,8 +163,7 @@ class SenderReceiverRnnReinforce(nn.Module):
         ######################################
         # Forward Propagation through Sender #
         ######################################
-        seq_s, logprob_s, entropy_s = self.sender(sender_input)
-        symb_seq_s, stop_seq_s = seq_s
+        symb_seq_s, stop_seq_s, logprob_s, entropy_s = self.sender(sender_input)
         symb_logprob_s, stop_logprob_s = logprob_s
         symb_entropy_s, stop_entropy_s = entropy_s
 
