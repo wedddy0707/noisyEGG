@@ -13,11 +13,7 @@ import torch
 from egg.core.baselines import MeanBaseline
 from egg.core.util import find_lengths
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-from common import RnnEncoder  # noqa: E402
+from rnn import RnnEncoder
 
 
 class RnnSenderReinforce(nn.Module):
