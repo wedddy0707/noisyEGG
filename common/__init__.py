@@ -1,3 +1,7 @@
+# Copyright (c) 2021 Ryo Ueda
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from .channel import Channel   # noqa: F401
 from .rnn import RnnEncoder    # noqa: F401
 from .eval import suffix_test  # noqa: F401
