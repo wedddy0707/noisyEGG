@@ -13,10 +13,15 @@ from egg.zoo.channel.features import OneHotLoader, UniformLoader
 from egg.zoo.channel.archs import Sender, Receiver
 from egg.zoo.channel.train import loss, dump
 
-from channel import Channel
 from reinforce_wrappers import RnnSenderReinforce
 from reinforce_wrappers import RnnReceiverDeterministic
 from reinforce_wrappers import SenderReceiverRnnReinforce
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from common import Channel  # noqa: E402
 
 
 def get_params(params):
