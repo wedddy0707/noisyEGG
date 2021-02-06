@@ -22,19 +22,21 @@ def suffix_test(game, n_features, device, add_eos=False):
             for m_idx in range(max_len):
                 if add_eos:
                     prefix = torch.cat((m[0:m_idx], torch.tensor([0])))
+                    prefix_type = 'prefix_with_eos'
                 else:
                     prefix = m[0:m_idx + 1]
+                    prefix_type = 'prefix_without_eos'
                 o = game.receiver(torch.stack([prefix]))
                 o = o[0]
 
                 dump_message = (
                     f'input: {i.argmax().item()} -> '
-                    f'message: {",".join([str(prefix[i].item()) for i in range(prefix.size(0))])} -> '
+                    f'{prefix_type}: {",".join([str(prefix[i].item()) for i in range(prefix.size(0))])} -> '
                     f'output: {o.argmax().item()}'
                 )
                 print(dump_message, flush=True)
 
-                if m[m_idx] == 0:
+                if m[min(m_idx, m.size(0) - 1)] == 0:
                     break
 
     game.train(mode=train_state)

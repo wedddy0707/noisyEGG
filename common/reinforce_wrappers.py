@@ -13,7 +13,7 @@ import torch
 from egg.core.baselines import MeanBaseline
 from egg.core.util import find_lengths
 
-from rnn import RnnEncoder
+from .rnn import RnnEncoder
 
 
 class RnnSenderReinforce(nn.Module):
