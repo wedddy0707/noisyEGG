@@ -3,16 +3,21 @@
 # This source code is licensed under the MIT license found in the
 # https://github.com/facebookresearch/EGG/blob/master/LICENSE
 
+
 from collections import defaultdict
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.distributions import Categorical
+import torch.nn.functional as F
+import torch.nn as nn
+import torch
 
-from egg.core.util import find_lengths
 from egg.core.baselines import MeanBaseline
+from egg.core.util import find_lengths
 
-from rnn import RnnEncoder
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from common import RnnEncoder  # noqa: E402
 
 
 class RnnSenderReinforce(nn.Module):
@@ -86,21 +91,17 @@ class RnnSenderReinforce(nn.Module):
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
+                e_t = float(self.training) * (
+                    self.noise_loc +
+                    self.noise_scale * torch.randn_like(prev_h[0]).to(prev_h[0])
+                )
                 if self.isLSTM:
                     h_t, c_t = layer(input, (prev_h[i], prev_c[i]))
-                    e_t = torch.randn_like(c_t).to(c_t)
-                    c_t = (
-                        c_t + self.noise_loc +
-                        e_t * float(self.training) * self.noise_scale
-                    )
+                    c_t = c_t + e_t
                     prev_c[i] = c_t
                 else:
                     h_t = layer(input, prev_h[i])
-                    e_t = torch.randn_like(h_t).to(h_t)
-                    h_t = (
-                        h_t + self.noise_loc +
-                        e_t * float(self.training) * self.noise_scale
-                    )
+                    h_t = h_t + e_t
                 prev_h[i] = h_t
                 input = h_t
 
