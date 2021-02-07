@@ -139,7 +139,7 @@ def get_params(params):
         help="the common_ratio of the weights of sender entropy")
     parser.add_argument(
         '--effective_max_len',
-        type=float,
+        type=int,
         default=None,
         help='effective max len'
     )
