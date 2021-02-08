@@ -21,7 +21,7 @@ def suffix_test(game, n_features, device, add_eos=False):
         for i, m in zip(inputs, messages):
             for m_idx in range(max_len):
                 if add_eos:
-                    prefix = torch.cat((m[0:m_idx], torch.tensor([0])))
+                    prefix = torch.cat((m[0:m_idx], torch.tensor([0]).to(m.device)))
                     prefix_type = 'prefix_with_eos'
                 else:
                     prefix = m[0:m_idx + 1]
