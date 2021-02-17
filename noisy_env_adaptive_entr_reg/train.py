@@ -251,6 +251,7 @@ def main(params):
         '''
         checkpoint_name = (
             f'{opts.name}' +
+            '_aer' +
             ('_uniform' if opts.probs == 'uniform' else '') +
             f'_f{opts.n_features}' +
             f'_vocab{opts.vocab_size}' +
