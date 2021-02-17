@@ -63,6 +63,9 @@ class SenderReceiverRnnReinforce(nn.Module):
         receiver_output, logprob_r, entropy_r = self.receiver(
             message, receiver_input, lengths)
 
+        loss, rest = self.loss(
+            sender_input, message, receiver_input, receiver_output, labels)
+
         ############################################
         # Calculation of Effective Entropy/Logprob #
         ############################################
@@ -90,8 +93,6 @@ class SenderReceiverRnnReinforce(nn.Module):
         #######################
         # Calculation of Loss #
         #######################
-        loss, rest = self.loss(
-            sender_input, message, receiver_input, receiver_output, labels)
         # Auxiliary losses
         if self.effective_max_len is None:
             len_loss = torch.zeros_like(lengths).to(lengths.device).float()
