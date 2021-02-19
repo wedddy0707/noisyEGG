@@ -97,12 +97,13 @@ def replacement_test(game, n_features, vocab_size, device):
         max_len = messages.size(1)
         for i, m in zip(inputs, messages):
             i_symb = i.argmax().item()
-            failure_cnt = 0
+            all_failure_cnt = 0
             eosed = False
             for m_idx in range(max_len):
                 if m[m_idx] == 0:
                     eosed = True
                     break
+                each_failure_cnt = 0
                 for dummy_symb in range(1, vocab_size):
                     if m[m_idx].item() == dummy_symb:
                         continue
@@ -114,7 +115,7 @@ def replacement_test(game, n_features, vocab_size, device):
                     o = game.receiver(torch.stack([m_repl]))
                     o = o[0]
                     o_symb = o.argmax().item()
-                    failure_cnt += int(not i_symb == o_symb)
+                    each_failure_cnt += int(not i_symb == o_symb)
 
                     comma_separeted_message = ",".join([
                         str(m_repl[i].item()) for i in range(m_repl.size(0))
@@ -126,12 +127,18 @@ def replacement_test(game, n_features, vocab_size, device):
                         f'output: {o_symb}'
                     )
                     print(dump_message, flush=True)
-            effective_length = failure_cnt / (n_features - 2)
+                effectiveness = each_failure_cnt / (n_features - 2)
+                print(
+                    f'input: {i_symb} -> '
+                    f'effectiveness_of_idx{m_idx}: {effectiveness}'
+                )
+                all_failure_cnt += each_failure_cnt
+            effective_length = all_failure_cnt / (n_features - 2)
             if eosed:
                 effective_length += 1
             print(
                 f'input: {i_symb} -> '
-                f'replacement_effective_length: {effective_length}'
+                f'effective_length_by_replacement: {effective_length}'
             )
 
     game.train(mode=train_state)
