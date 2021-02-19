@@ -96,26 +96,42 @@ def replacement_test(game, n_features, device):
         messages = messages[0]
         max_len = messages.size(1)
         for i, m in zip(inputs, messages):
+            i_symb = i.argmax().item()
+            failure_cnt = 0
+            eosed = False
             for m_idx in range(max_len):
                 if m[m_idx] == 0:
+                    eosed = True
                     break
                 for dummy_symb in range(1, n_features):
                     if m[m_idx].item() == dummy_symb:
                         continue
-                    m_repl = m[:first_eos_index(m) + 1].clone()
-                    m_repl[m_idx] = dummy_symb
+                    m_repl = torch.cat([
+                        m[:m_idx],
+                        torch.tensor([dummy_symb]).to(device),
+                        m[m_idx + 1:first_eos_index(m) + 1]
+                    ])
                     o = game.receiver(torch.stack([m_repl]))
                     o = o[0]
+                    o_symb = o.argmax().item()
+                    failure_cnt += int(not i_symb == o_symb)
 
                     comma_separeted_message = ",".join([
                         str(m_repl[i].item()) for i in range(m_repl.size(0))
                     ])
                     dump_message = (
-                        f'input: {i.argmax().item()} -> '
+                        f'input: {i_symb} -> '
                         f'replaced_at{m_idx}_to{dummy_symb}: '
                         f'{comma_separeted_message} -> '
-                        f'output: {o.argmax().item()}'
+                        f'output: {o_symb}'
                     )
                     print(dump_message, flush=True)
+            effective_length = failure_cnt / (n_features - 2)
+            if eosed:
+                effective_length += 1
+            print(
+                f'input: {i_symb} -> '
+                f'replacement_effective_length: {effective_length}'
+            )
 
     game.train(mode=train_state)
