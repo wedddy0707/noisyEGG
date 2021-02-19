@@ -144,6 +144,12 @@ def get_params(params):
         default=None,
         help='effective max len'
     )
+    parser.add_argument(
+        '--checkpoint_path_to_evaluate',
+        type=str,
+        default=None,
+        help=''
+    )
 
     args = core.init(parser, params)
 
@@ -280,16 +286,21 @@ def main(params):
         validation_data=test_loader,
         callbacks=callbacks)
 
-    trainer.train(n_epochs=opts.n_epochs)
-
-    print('-- prefix test without adding eos --')
+    if opts.checkpoint_path_to_evaluate is None:
+        trainer.train(n_epochs=opts.n_epochs)
+    else:
+        trainer.load_from_checkpoint(opts.checkpoint_path_to_evaluate)
+    print('<div id="prefix test without eos">')
     prefix_test(trainer.game, opts.n_features, device, add_eos=False)
-    print('-- prefix test adding eos --')
+    print('</div>')
+    print('<div id="prefix test with eos">')
     prefix_test(trainer.game, opts.n_features, device, add_eos=True)
-    print('-- suffix test')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=True)
-    print('-- dump --')
+    print('<div id="suffix test">')
+    suffix_test(trainer.game, opts.n_features, device)
+    print('</div>')
+    print('<div id="dump">')
     dump(trainer.game, opts.n_features, device, False)
+    print('</div>')
     core.close()
 
 
