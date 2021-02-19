@@ -127,13 +127,13 @@ def replacement_test(game, n_features, vocab_size, device):
                         f'output: {o_symb}'
                     )
                     print(dump_message, flush=True)
-                effectiveness = each_failure_cnt / (n_features - 2)
+                effectiveness = each_failure_cnt / (vocab_size - 2)
                 print(
                     f'input: {i_symb} -> '
                     f'effectiveness_of_idx{m_idx}: {effectiveness}'
                 )
                 all_failure_cnt += each_failure_cnt
-            effective_length = all_failure_cnt / (n_features - 2)
+            effective_length = all_failure_cnt / (vocab_size - 2)
             if eosed:
                 effective_length += 1
             print(
