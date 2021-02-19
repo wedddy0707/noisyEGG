@@ -6,7 +6,7 @@
 import torch
 
 
-def suffix_test(game, n_features, device, add_eos=False):
+def prefix_test(game, n_features, device, add_eos=False):
     train_state = game.training  # persist so we restore it back
     game.eval()
 
@@ -21,7 +21,9 @@ def suffix_test(game, n_features, device, add_eos=False):
         for i, m in zip(inputs, messages):
             for m_idx in range(max_len):
                 if add_eos:
-                    prefix = torch.cat((m[0:m_idx], torch.tensor([0]).to(m.device)))
+                    prefix = torch.cat(
+                        (m[0:m_idx], torch.tensor([0]).to(m.device))
+                    )
                     prefix_type = 'prefix_with_eos'
                 else:
                     prefix = m[0:m_idx + 1]
@@ -29,9 +31,12 @@ def suffix_test(game, n_features, device, add_eos=False):
                 o = game.receiver(torch.stack([prefix]))
                 o = o[0]
 
+                comma_separeted_prefix = ",".join([
+                    str(prefix[i].item()) for i in range(prefix.size(0))
+                ])
                 dump_message = (
                     f'input: {i.argmax().item()} -> '
-                    f'{prefix_type}: {",".join([str(prefix[i].item()) for i in range(prefix.size(0))])} -> '
+                    f'{prefix_type}: {comma_separeted_prefix} -> '
                     f'output: {o.argmax().item()}'
                 )
                 print(dump_message, flush=True)
@@ -40,3 +45,35 @@ def suffix_test(game, n_features, device, add_eos=False):
                     break
 
     game.train(mode=train_state)
+
+
+def suffix_test(game, n_features, device):
+    train_state = game.training  # persist so we restore it back
+    game.eval()
+
+    with torch.no_grad():
+        inputs = torch.eye(n_features).to(device)
+        messages = game.sender(inputs)
+        messages = messages[0]
+        max_len = messages.size(1)
+        for i, m in zip(inputs, messages):
+            for m_idx in range(max_len):
+                suffix = m[m_idx:-1]
+                o = game.receiver(torch.stack([suffix]))
+                o = o[0]
+
+                comma_separeted_suffix = ",".join([
+                    str(suffix[i].item()) for i in range(suffix.size(0))
+                ])
+                dump_message = (
+                    f'input: {i.argmax().item()} -> '
+                    f'suffix: {comma_separeted_suffix} -> '
+                    f'output: {o.argmax().item()}'
+                )
+                print(dump_message, flush=True)
+
+                if m[m_idx] == 0:
+                    break
+
+    game.train(mode=train_state)
+

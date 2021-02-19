@@ -21,6 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from common import Channel                     # noqa: E402
 from common import RnnSenderReinforce          # noqa: E402
 from common import RnnReceiverDeterministic    # noqa: E402
+from common import prefix_test                 # noqa: E402
 from common import suffix_test                 # noqa: E402
 
 
@@ -282,10 +283,12 @@ def main(params):
 
     trainer.train(n_epochs=opts.n_epochs)
 
-    print('-- suffix test without adding eos --')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=False)
-    print('-- suffix test adding eos --')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=True)
+    print('-- prefix test without adding eos --')
+    prefix_test(trainer.game, opts.n_features, device, add_eos=False)
+    print('-- prefix test adding eos --')
+    prefix_test(trainer.game, opts.n_features, device, add_eos=True)
+    print('-- suffix test')
+    suffix_test(trainer.game, opts.n_features, device)
     print('-- dump --')
     dump(trainer.game, opts.n_features, device, False)
     core.close()

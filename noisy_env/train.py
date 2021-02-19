@@ -20,6 +20,7 @@ from common import Channel                     # noqa: E402
 from common import RnnSenderReinforce          # noqa: E402
 from common import RnnReceiverDeterministic    # noqa: E402
 from common import SenderReceiverRnnReinforce  # noqa: E402
+from common import prefix_test                 # noqa: E402
 from common import suffix_test                 # noqa: E402
 
 
@@ -141,6 +142,12 @@ def get_params(params):
         type=float,
         default=0.0,
         help='the coefficient of machine-gun-talk penalty'
+    )
+    parser.add_argument(
+        '--checkpoint_path_to_evaluate',
+        type=str,
+        default=None,
+        help=''
     )
 
     args = core.init(parser, params)
@@ -278,14 +285,22 @@ def main(params):
         validation_data=test_loader,
         callbacks=callbacks)
 
-    trainer.train(n_epochs=opts.n_epochs)
+    if opts.checkpoint_path_to_evaluate is None:
+        trainer.train(n_epochs=opts.n_epochs)
 
-    print('-- suffix test without adding eos --')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=False)
-    print('-- suffix test adding eos --')
-    suffix_test(trainer.game, opts.n_features, device, add_eos=True)
-    print('-- dump --')
+    else:
+        trainer.load_from_checkpoint(opts.checkpoint_path_to_evaluate)
+    print('<div id="prefix test without eos">')
+    prefix_test(trainer.game, opts.n_features, device, add_eos=False)
+    print('</div>')
+    print('<div id="prefix test with eos">')
+    prefix_test(trainer.game, opts.n_features, device, add_eos=True)
+    print('<div id="suffix test">')
+    suffix_test(trainer.game, opts.n_features, device)
+    print('</div>')
+    print('<div id="dump">')
     dump(trainer.game, opts.n_features, device, False)
+    print('</div>')
     core.close()
 
 
