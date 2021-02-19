@@ -300,7 +300,7 @@ def main(params):
     suffix_test(trainer.game, opts.n_features, device)
     print('</div>')
     print('<div id="replacement test">')
-    replacement_test(trainer.game, opts.n_features, device)
+    replacement_test(trainer.game, opts.n_features, opts.vocab_size, device)
     print('</div>')
     print('<div id="dump">')
     dump(trainer.game, opts.n_features, device, False)

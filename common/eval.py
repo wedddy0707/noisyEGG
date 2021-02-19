@@ -86,7 +86,7 @@ def suffix_test(game, n_features, device):
     game.train(mode=train_state)
 
 
-def replacement_test(game, n_features, device):
+def replacement_test(game, n_features, vocab_size, device):
     train_state = game.training  # persist so we restore it back
     game.eval()
 
@@ -103,7 +103,7 @@ def replacement_test(game, n_features, device):
                 if m[m_idx] == 0:
                     eosed = True
                     break
-                for dummy_symb in range(1, n_features):
+                for dummy_symb in range(1, vocab_size):
                     if m[m_idx].item() == dummy_symb:
                         continue
                     m_repl = torch.cat([
