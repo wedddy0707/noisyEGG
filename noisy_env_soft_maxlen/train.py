@@ -23,6 +23,7 @@ from common import RnnSenderReinforce          # noqa: E402
 from common import RnnReceiverDeterministic    # noqa: E402
 from common import prefix_test                 # noqa: E402
 from common import suffix_test                 # noqa: E402
+from common import replacement_test            # noqa: E402
 
 
 def get_params(params):
@@ -297,6 +298,9 @@ def main(params):
     prefix_test(trainer.game, opts.n_features, device, add_eos=True)
     print('<div id="suffix test">')
     suffix_test(trainer.game, opts.n_features, device)
+    print('</div>')
+    print('<div id="replacement test">')
+    replacement_test(trainer.game, opts.n_features, device)
     print('</div>')
     print('<div id="dump">')
     dump(trainer.game, opts.n_features, device, False)

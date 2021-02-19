@@ -84,3 +84,38 @@ def suffix_test(game, n_features, device):
                     break
 
     game.train(mode=train_state)
+
+
+def replacement_test(game, n_features, device):
+    train_state = game.training  # persist so we restore it back
+    game.eval()
+
+    with torch.no_grad():
+        inputs = torch.eye(n_features).to(device)
+        messages = game.sender(inputs)
+        messages = messages[0]
+        max_len = messages.size(1)
+        for i, m in zip(inputs, messages):
+            for m_idx in range(max_len):
+                if m[m_idx] == 0:
+                    break
+                for dummy_symb in range(1, n_features):
+                    if m[m_idx].item() == dummy_symb:
+                        continue
+                    m_repl = m[:first_eos_index(m) + 1].clone()
+                    m_repl[m_idx] = dummy_symb
+                    o = game.receiver(torch.stack([m_repl]))
+                    o = o[0]
+
+                    comma_separeted_message = ",".join([
+                        str(m_repl[i].item()) for i in range(m_repl.size(0))
+                    ])
+                    dump_message = (
+                        f'input: {i.argmax().item()} -> '
+                        f'replaced_at{m_idx}_to{dummy_symb}: '
+                        f'{comma_separeted_message} -> '
+                        f'output: {o.argmax().item()}'
+                    )
+                    print(dump_message, flush=True)
+
+    game.train(mode=train_state)

@@ -6,6 +6,7 @@ from .channel import Channel   # noqa: F401
 from .rnn import RnnEncoder    # noqa: F401
 from .eval import prefix_test  # noqa: F401
 from .eval import suffix_test  # noqa: F401
+from .eval import replacement_test  # noqa: F401
 from .reinforce_wrappers import RnnSenderReinforce          # noqa: F401
 from .reinforce_wrappers import RnnReceiverDeterministic    # noqa: F401
 from .reinforce_wrappers import SenderReceiverRnnReinforce  # noqa: F401
