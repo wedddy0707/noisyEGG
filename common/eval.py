@@ -49,7 +49,7 @@ def prefix_test(game, n_features, device, add_eos=False):
 
 def first_eos_index(x):
     for i in range(x.size(0)):
-        if x[0] == 0:
+        if x[i] == 0:
             return i
     return x.size(0) - 1
 
