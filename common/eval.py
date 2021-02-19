@@ -47,6 +47,13 @@ def prefix_test(game, n_features, device, add_eos=False):
     game.train(mode=train_state)
 
 
+def first_eos_index(x):
+    for i in range(x.size(0)):
+        if x[0] == 0:
+            return i
+    return x.size(0) - 1
+
+
 def suffix_test(game, n_features, device):
     train_state = game.training  # persist so we restore it back
     game.eval()
@@ -58,7 +65,8 @@ def suffix_test(game, n_features, device):
         max_len = messages.size(1)
         for i, m in zip(inputs, messages):
             for m_idx in range(max_len):
-                suffix = m[m_idx:-1]
+                suffix = m[m_idx:]
+                suffix = suffix[:first_eos_index(suffix) + 1]
                 o = game.receiver(torch.stack([suffix]))
                 o = o[0]
 
@@ -76,4 +84,3 @@ def suffix_test(game, n_features, device):
                     break
 
     game.train(mode=train_state)
-
