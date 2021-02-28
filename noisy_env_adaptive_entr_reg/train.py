@@ -23,6 +23,7 @@ from common import RnnSenderReinforce          # noqa: E402
 from common import RnnReceiverDeterministic    # noqa: E402
 from common import prefix_test                 # noqa: E402
 from common import suffix_test                 # noqa: E402
+from common import replacement_test            # noqa: E402
 
 
 def get_params(params):
@@ -282,15 +283,20 @@ def main(params):
         callbacks=callbacks)
 
     trainer.train(n_epochs=opts.n_epochs)
-
-    print('-- prefix test without adding eos --')
+    print('<div id="prefix test without eos">')
     prefix_test(trainer.game, opts.n_features, device, add_eos=False)
-    print('-- prefix test adding eos --')
+    print('</div>')
+    print('<div id="prefix test with eos">')
     prefix_test(trainer.game, opts.n_features, device, add_eos=True)
-    print('-- suffix test')
+    print('<div id="suffix test">')
     suffix_test(trainer.game, opts.n_features, device)
-    print('-- dump --')
+    print('</div>')
+    print('<div id="replacement test">')
+    replacement_test(trainer.game, opts.n_features, opts.vocab_size, device)
+    print('</div>')
+    print('<div id="dump">')
     dump(trainer.game, opts.n_features, device, False)
+    print('</div>')
     core.close()
 
 
