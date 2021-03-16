@@ -10,6 +10,8 @@ import torch.nn as nn
 
 from egg.core.util import find_lengths
 
+from .noise import Noise
+
 
 class NoisyCell(nn.Module):
     def __init__(
@@ -18,8 +20,9 @@ class NoisyCell(nn.Module):
         n_hidden: int,
         cell: str = "rnn",
         num_layers: int = 1,
-        noise_loc: float = 0.0,
-        noise_scale: float = 0.0,
+        noise_loc=None,
+        noise_scale=None,
+        dropout_p=None,
     ) -> None:
         super(NoisyCell, self).__init__()
 
@@ -33,12 +36,16 @@ class NoisyCell(nn.Module):
             raise ValueError(f"Unknown RNN Cell: {cell}")
 
         self.isLSTM = cell == "lstm"
-        self.noise_loc = noise_loc
-        self.noise_scale = noise_scale
+
+        self.noise_layer = Noise(
+            loc=noise_loc,
+            scale=noise_scale,
+            dropout_p=dropout_p,
+        )
 
         self.cells = nn.ModuleList([
-            cell_type[cell](input_size=embed_dim, hidden_size=n_hidden) if i == 0 else
-            cell_type[cell](input_size=n_hidden, hidden_size=n_hidden) for i in range(num_layers)])
+            cell_type[cell](embed_dim, n_hidden) if i == 0 else
+            cell_type[cell](n_hidden, n_hidden) for i in range(num_layers)])
 
     def forward(self, input: torch.Tensor, h_0: Optional[torch.Tensor] = None):
         is_packed = isinstance(input, torch.nn.utils.rnn.PackedSequence)
@@ -67,24 +74,13 @@ class NoisyCell(nn.Module):
                 x = input[input_idx:input_idx + batch_size]
                 for i, layer in enumerate(self.cells):
                     if self.isLSTM:
-                        h, c = layer(
-                            x, (prev_h[i][0:batch_size], prev_c[i][0:batch_size]))
-                        e = torch.randn_like(c).to(c.device)
-                        c = (
-                            c + self.noise_loc +
-                            e * float(self.training) * self.noise_scale
-                        )
-                        prev_c[i] = torch.cat(
-                            (c, prev_c[i][batch_size:max_batch_size]))
+                        h, c = layer(x, (prev_h[i][:batch_size], prev_c[i][:batch_size]))  # noqa: E501
+                        c = self.noise_layer(c)
+                        prev_c[i] = torch.cat((c, prev_c[i][batch_size:]))  # noqa: E501
                     else:
-                        h = layer(x, prev_h[i][0:batch_size])
-                        e = torch.randn_like(h).to(h.device)
-                        h = (
-                            h + self.noise_loc +
-                            e * float(self.training) * self.noise_scale
-                        )
-                    prev_h[i] = torch.cat(
-                        (h, prev_h[i][batch_size:max_batch_size]))
+                        h = layer(x, prev_h[i][:batch_size])
+                        h = self.noise_layer(h)
+                    prev_h[i] = torch.cat((h, prev_h[i][batch_size:]))
                     x = h
                 input_idx += batch_size
 
@@ -104,29 +100,17 @@ class NoisyCell(nn.Module):
 
 
 class RnnEncoder(nn.Module):
-    """Feeds a sequence into an RNN (vanilla RNN, GRU, LSTM) cell and returns a vector representation
-    of it, which is found as the last hidden state of the last RNN layer. Assumes that the eos token has the id equal to 0.
-    """
-
-    def __init__(self,
-                 vocab_size: int,
-                 embed_dim: int,
-                 n_hidden: int,
-                 cell: str = 'rnn',
-                 num_layers: int = 1,
-                 noise_loc: float = 0.0,
-                 noise_scale: float = 0.0
-                 ) -> None:
-        """
-        Arguments:
-            vocab_size {int} -- The size of the input vocabulary (including eos)
-            embed_dim {int} -- Dimensionality of the embeddings
-            n_hidden {int} -- Dimensionality of the cell's hidden state
-
-        Keyword Arguments:
-            cell {str} -- Type of the cell ('rnn', 'gru', or 'lstm') (default: {'rnn'})
-            num_layers {int} -- Number of the stacked RNN layers (default: {1})
-        """
+    def __init__(
+        self,
+        vocab_size: int,
+        embed_dim: int,
+        n_hidden: int,
+        cell: str = 'rnn',
+        num_layers: int = 1,
+        noise_loc=None,
+        noise_scale=None,
+        dropout_p=None,
+    ) -> None:
         super(RnnEncoder, self).__init__()
 
         self.noisycell = NoisyCell(
@@ -136,6 +120,7 @@ class RnnEncoder(nn.Module):
             num_layers,
             noise_loc,
             noise_scale,
+            dropout_p,
         )
 
         self.embedding = nn.Embedding(vocab_size, embed_dim)

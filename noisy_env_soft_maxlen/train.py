@@ -12,7 +12,6 @@ from egg.zoo.channel.features import OneHotLoader, UniformLoader
 from egg.zoo.channel.archs import Sender, Receiver
 from egg.zoo.channel.train import loss, dump
 
-from game import SenderReceiverRnnReinforce
 
 import sys
 import os
@@ -21,119 +20,44 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from common import Channel                     # noqa: E402
 from common import RnnSenderReinforce          # noqa: E402
 from common import RnnReceiverDeterministic    # noqa: E402
+from common import SenderReceiverRnnReinforce  # noqa: E402
 from common import prefix_test                 # noqa: E402
 from common import suffix_test                 # noqa: E402
 from common import replacement_test            # noqa: E402
+from common import get_common_params           # noqa: E402
 
 
 def get_params(params):
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--n_features',
-        type=int,
-        default=10,
-        help='Dimensionality of the "concept" space (default: 10)')
-    parser.add_argument('--batches_per_epoch', type=int, default=1000,
-                        help='Number of batches per epoch (default: 1000)')
-    parser.add_argument(
-        '--force_eos',
-        type=int,
-        default=0,
-        help='Force EOS at the end of the messages (default: 0)')
-
-    parser.add_argument(
-        '--sender_hidden',
-        type=int,
-        default=10,
-        help='Size of the hidden layer of Sender (default: 10)')
-    parser.add_argument(
-        '--receiver_hidden',
-        type=int,
-        default=10,
-        help='Size of the hidden layer of Receiver (default: 10)')
-    parser.add_argument(
-        '--receiver_num_layers',
-        type=int,
-        default=1,
-        help='Number hidden layers of receiver. Only in reinforce (default: 1)')
-    parser.add_argument(
-        '--sender_num_layers',
-        type=int,
-        default=1,
-        help='Number hidden layers of receiver. Only in reinforce (default: 1)')
-    parser.add_argument(
-        '--sender_embedding',
-        type=int,
-        default=10,
-        help='Dimensionality of the embedding hidden layer for Sender (default: 10)')
-    parser.add_argument(
-        '--receiver_embedding',
-        type=int,
-        default=10,
-        help='Dimensionality of the embedding hidden layer for Receiver (default: 10)')
-
-    parser.add_argument(
-        '--sender_cell',
-        type=str,
-        default='rnn',
-        help='Type of the cell used for Sender {rnn, gru, lstm} (default: rnn)')
-    parser.add_argument(
-        '--receiver_cell',
-        type=str,
-        default='rnn',
-        help='Type of the model used for Receiver {rnn, gru, lstm} (default: rnn)')
-
-    parser.add_argument(
-        '--sender_entropy_coeff',
-        type=float,
-        default=1e-1,
-        help='The entropy regularisation coefficient for Sender (default: 1e-1)')
-    parser.add_argument(
-        '--receiver_entropy_coeff',
-        type=float,
-        default=1e-1,
-        help='The entropy regularisation coefficient for Receiver (default: 1e-1)')
-
-    parser.add_argument(
-        '--probs',
-        type=str,
-        default='uniform',
-        help="Prior distribution over the concepts (default: uniform)")
-    parser.add_argument(
-        '--length_cost',
-        type=float,
-        default=0.0,
-        help="Penalty for the message length, each symbol would before <EOS> would be "
-        "penalized by this cost (default: 0.0)")
-    parser.add_argument('--name', type=str, default='model',
-                        help="Name for your checkpoint (default: model)")
-    parser.add_argument(
-        '--early_stopping_thr',
-        type=float,
-        default=0.9999,
-        help="Early stopping threshold on accuracy (default: 0.9999)")
-    parser.add_argument(
         '--sender_noise_loc',
         type=float,
         default=0.0,
-        help="The mean of the noise added to the hidden layers of Sender")
+        help='The mean of the noise '
+        'added to the hidden layers of Sender')
     parser.add_argument(
         '--sender_noise_scale',
         type=float,
         default=0.0,
-        help="The standard deviation of the noise added to the hidden layers of Sender")
+        help='The standard deviation of the noise '
+        'added to the hidden layers of Sender')
     parser.add_argument(
         '--receiver_noise_loc',
         type=float,
         default=0.0,
-        help="The mean of the noise added to the hidden layers of Receiver")
+        help='The mean of the noise '
+        'added to the hidden layers of Receiver')
     parser.add_argument(
         '--receiver_noise_scale',
         type=float,
         default=0.0,
-        help="The standard deviation of the noise added to the hidden layers of Receiver")
-    parser.add_argument('--channel_repl_prob', type=float, default=0.0,
-                        help="The probability of peplacement of each signal")
+        help='The standard deviation of the noise '
+        'added to the hidden layers of Receiver')
+    parser.add_argument(
+        '--channel_repl_prob',
+        type=float,
+        default=0.0,
+        help="The probability of peplacement of each signal")
     parser.add_argument(
         '--sender_entropy_common_ratio',
         type=float,
@@ -146,15 +70,19 @@ def get_params(params):
         help='effective max len'
     )
     parser.add_argument(
-        '--checkpoint_path_to_evaluate',
-        type=str,
+        '--sender_dropout_p',
+        type=float,
         default=None,
-        help=''
+        help='sender dropout p',
+    )
+    parser.add_argument(
+        '--receiver_dropout_p',
+        type=float,
+        default=None,
+        help='receiver dropout p',
     )
 
-    args = core.init(parser, params)
-
-    return args
+    return get_common_params(params, parser)
 
 
 def main(params):
@@ -200,7 +128,8 @@ def main(params):
         num_layers=opts.sender_num_layers,
         force_eos=force_eos,
         noise_loc=opts.sender_noise_loc,
-        noise_scale=opts.sender_noise_scale)
+        noise_scale=opts.sender_noise_scale,
+        dropout_p=opts.sender_dropout_p)
 
     ####################################
     # define receiver (listener) agent #
@@ -216,7 +145,8 @@ def main(params):
         cell=opts.receiver_cell,
         num_layers=opts.receiver_num_layers,
         noise_loc=opts.receiver_noise_loc,
-        noise_scale=opts.receiver_noise_scale)
+        noise_scale=opts.receiver_noise_scale,
+        dropout_p=opts.receiver_dropout_p)
 
     ###################
     # define  channel #

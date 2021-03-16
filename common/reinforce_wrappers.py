@@ -13,6 +13,7 @@ import torch
 from egg.core.baselines import MeanBaseline
 from egg.core.util import find_lengths
 
+from .noise import Noise
 from .rnn import RnnEncoder
 
 
@@ -27,8 +28,9 @@ class RnnSenderReinforce(nn.Module):
             num_layers=1,
             cell='rnn',
             force_eos=True,
-            noise_loc=0.0,
-            noise_scale=0.0,
+            noise_loc=None,
+            noise_scale=None,
+            dropout_p=None,
     ):
         super(RnnSenderReinforce, self).__init__()
         self.agent = agent
@@ -44,8 +46,11 @@ class RnnSenderReinforce(nn.Module):
         self.vocab_size = vocab_size
         self.num_layers = num_layers
 
-        self.noise_loc = noise_loc
-        self.noise_scale = noise_scale
+        self.noise_layer = Noise(
+            loc=noise_loc,
+            scale=noise_scale,
+            dropout_p=dropout_p,
+        )
 
         cell = cell.lower()
         cell_types = {
@@ -87,17 +92,13 @@ class RnnSenderReinforce(nn.Module):
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
-                e_t = float(self.training) * (
-                    self.noise_loc +
-                    self.noise_scale * torch.randn_like(prev_h[0]).to(prev_h[0])
-                )
                 if self.isLSTM:
                     h_t, c_t = layer(input, (prev_h[i], prev_c[i]))
-                    c_t = c_t + e_t
+                    c_t = self.noise_layer(c_t)
                     prev_c[i] = c_t
                 else:
                     h_t = layer(input, prev_h[i])
-                    h_t = h_t + e_t
+                    h_t = self.noise_layer(h_t)
                 prev_h[i] = h_t
                 input = h_t
 
@@ -123,16 +124,18 @@ class RnnSenderReinforce(nn.Module):
 
 
 class RnnReceiverDeterministic(nn.Module):
-    def __init__(self,
-                 agent,
-                 vocab_size,
-                 embed_dim,
-                 hidden_size,
-                 cell='rnn',
-                 num_layers=1,
-                 noise_loc=0.0,
-                 noise_scale=0.0,
-                 ):
+    def __init__(
+        self,
+        agent,
+        vocab_size,
+        embed_dim,
+        hidden_size,
+        cell='rnn',
+        num_layers=1,
+        noise_loc=None,
+        noise_scale=None,
+        dropout_p=None,
+    ):
         super(RnnReceiverDeterministic, self).__init__()
         self.agent = agent
         self.encoder = RnnEncoder(
@@ -156,18 +159,19 @@ class RnnReceiverDeterministic(nn.Module):
 
 
 class SenderReceiverRnnReinforce(nn.Module):
-    def __init__(self,
-                 sender,
-                 receiver,
-                 loss,
-                 sender_entropy_coeff,
-                 receiver_entropy_coeff,
-                 length_cost=0.0,
-                 machineguntalk_cost=0.0,
-                 baseline_type=MeanBaseline,
-                 channel=(lambda x: x),
-                 sender_entropy_common_ratio=1.0,
-                 ):
+    def __init__(
+        self,
+        sender,
+        receiver,
+        loss,
+        sender_entropy_coeff,
+        receiver_entropy_coeff,
+        length_cost=0.0,
+        effective_max_len=None,
+        baseline_type=MeanBaseline,
+        channel=(lambda x: x),
+        sender_entropy_common_ratio=1.0,
+    ):
         super(SenderReceiverRnnReinforce, self).__init__()
         self.sender = sender
         self.receiver = receiver
@@ -176,7 +180,7 @@ class SenderReceiverRnnReinforce(nn.Module):
         self.receiver_entropy_coeff = receiver_entropy_coeff
         self.loss = loss
         self.len_cost = length_cost
-        self.mgt_cost = machineguntalk_cost
+        self.effective_max_len = effective_max_len
 
         self.channel = channel
 
@@ -233,8 +237,12 @@ class SenderReceiverRnnReinforce(nn.Module):
         loss, rest = self.loss(
             sender_input, message, receiver_input, receiver_output, labels)
         # Auxiliary losses
-        len_loss = lengths.float() * self.len_cost
-        mgt_loss = (lengths == max_len).float() * self.mgt_cost
+        if self.effective_max_len is None:
+            len_loss = torch.zeros_like(lengths).to(lengths.device).float()
+        else:
+            len_loss = self.len_cost * (
+                lengths - self.effective_max_len
+            ).clamp_(min=0).float()
 
         policy_loss = ((
             loss.detach() - self.baselines['loss'].predict(loss.detach())
@@ -242,22 +250,17 @@ class SenderReceiverRnnReinforce(nn.Module):
         policy_len_loss = ((
             len_loss - self.baselines['len'].predict(len_loss)
         ) * effective_logprob_s).mean()
-        policy_mgt_loss = ((
-            mgt_loss - self.baselines['mgt'].predict(mgt_loss)
-        ) * effective_logprob_s).mean()
 
         optimized_loss = (
             loss.mean() +
             policy_loss +
-            policy_len_loss +
-            policy_mgt_loss -
+            policy_len_loss -
             entropy
         )
 
         if self.training:
             self.baselines['loss'].update(loss)
             self.baselines['len'].update(len_loss)
-            self.baselines['mgt'].update(mgt_loss)
 
         for k, v in rest.items():
             rest[k] = v.mean().item() if hasattr(v, 'mean') else v
