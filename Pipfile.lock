@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "e41c24fe31f100b82bd60da91cf5d4a9e4695757c1e7e745e3bba28dd991ec4d"
+            "sha256": "0e4d6fb1b4a0d46c400049e99c207fc9bfed8e1d48e252e6102b081d968625a2"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -23,6 +23,13 @@
             ],
             "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2, 3.3'",
             "version": "==20.3.0"
+        },
+        "cuda": {
+            "hashes": [
+                "sha256:41a4c6942dc879faabe3cbef6e2ca56e652f8c9f454116a65a51b0be4ef77321"
+            ],
+            "index": "pypi",
+            "version": "==0.0.1"
         },
         "egg": {
             "git": "https://github.com/facebookresearch/EGG.git",

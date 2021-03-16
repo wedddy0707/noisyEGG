@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 egg = {ref = "v1.0", git = "https://github.com/facebookresearch/EGG.git"}
+cuda = "*"
 
 [dev-packages]
 
