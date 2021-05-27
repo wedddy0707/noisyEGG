@@ -1,7 +1,11 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) 2021 Ryo Ueda
 
 # This source code is licensed under the MIT license found in the
-# https://github.com/facebookresearch/EGG/blob/master/LICENSE
+# LICENSE file in the root directory of this source tree.
+
+
+# This file is based on egg.core.reingorce_wrappers.py
+
 
 from collections import defaultdict
 import torch
