@@ -26,3 +26,4 @@ common/__pycache__/reinforce_wrappers.cpython-37.pyc
 common/__pycache__/reinforce_wrappers.cpython-37.pyc
 common/__pycache__/eval.cpython-37.pyc
 noisy_env_soft_maxlen/__pycache__/game.cpython-37.pyc
+Pipfile.lock
